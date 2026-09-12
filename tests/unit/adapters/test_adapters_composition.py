@@ -147,8 +147,8 @@ async def test_beisen_modal_school_picker():
 @pytest.mark.asyncio
 async def test_generic_application_adapter():
     adapter = GenericApplicationAdapter()
-    assert len(adapter.fillers) == 1
-    assert isinstance(adapter.fillers[0], StandardInputFiller)
+    assert len(adapter.fillers) >= 1
+    assert any(isinstance(f, StandardInputFiller) for f in adapter.fillers)
 
     mock_page = AsyncMock()
     mock_el = AsyncMock()

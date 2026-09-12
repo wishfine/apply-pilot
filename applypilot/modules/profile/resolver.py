@@ -162,7 +162,35 @@ class ValueResolver:
                                 if matched is not None:
                                     curr = matched
                                 else:
-                                    return None
+                                    # Fallback for assets
+                                    if curr and any(
+                                        hasattr(item, "asset_type")
+                                        or (isinstance(item, dict) and "asset_type" in item)
+                                        for item in curr
+                                    ):
+                                        fallback_asset = None
+                                        # 1. First asset with asset_type == "resume_pdf"
+                                        for item in curr:
+                                            if _get_val(item, "asset_type") == "resume_pdf":
+                                                fallback_asset = item
+                                                break
+                                        # 2. First asset whose file_path ends with .pdf
+                                        if fallback_asset is None:
+                                            for item in curr:
+                                                fp = str(_get_val(item, "file_path") or "")
+                                                if fp.lower().endswith(".pdf"):
+                                                    fallback_asset = item
+                                                    break
+                                        # 3. First asset in profile.assets
+                                        if fallback_asset is None and len(curr) > 0:
+                                            fallback_asset = curr[0]
+
+                                        if fallback_asset is not None:
+                                            curr = fallback_asset
+                                        else:
+                                            return None
+                                    else:
+                                        return None
                             elif isinstance(curr, dict):
                                 if val in curr:
                                     curr = curr[val]

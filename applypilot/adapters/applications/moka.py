@@ -8,7 +8,12 @@ from applypilot.adapters.applications.base import (
     ComponentFiller,
     FillResult,
 )
-from applypilot.adapters.applications.generic import StandardInputFiller
+from applypilot.adapters.applications.generic import (
+    FileUploadFiller,
+    NativeSelectFiller,
+    RadioCheckboxFiller,
+    StandardInputFiller,
+)
 
 
 class MokaSearchSelectFiller:
@@ -62,7 +67,13 @@ class MokaApplicationAdapter(BaseApplicationAdapter):
         super().__init__(
             fillers=fillers
             if fillers is not None
-            else [MokaSearchSelectFiller(), StandardInputFiller()]
+            else [
+                MokaSearchSelectFiller(),
+                FileUploadFiller(),
+                NativeSelectFiller(),
+                RadioCheckboxFiller(),
+                StandardInputFiller(),
+            ]
         )
 
 

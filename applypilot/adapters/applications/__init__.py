@@ -11,7 +11,10 @@ from applypilot.adapters.applications.beisen import (
     BeisenModalSchoolPicker,
 )
 from applypilot.adapters.applications.generic import (
+    FileUploadFiller,
     GenericApplicationAdapter,
+    NativeSelectFiller,
+    RadioCheckboxFiller,
     StandardInputFiller,
 )
 from applypilot.adapters.applications.moka import (
@@ -26,8 +29,11 @@ __all__ = [
     "BeisenModalSchoolPicker",
     "ComponentFiller",
     "FillResult",
+    "FileUploadFiller",
     "GenericApplicationAdapter",
     "MokaApplicationAdapter",
     "MokaSearchSelectFiller",
+    "NativeSelectFiller",
+    "RadioCheckboxFiller",
     "StandardInputFiller",
 ]

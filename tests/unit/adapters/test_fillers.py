@@ -1,0 +1,415 @@
+from pathlib import Path
+from unittest.mock import AsyncMock
+import pytest
+
+from applypilot.adapters.applications import (
+    BeisenApplicationAdapter,
+    BeisenModalSchoolPicker,
+    FileUploadFiller,
+    GenericApplicationAdapter,
+    MokaApplicationAdapter,
+    MokaSearchSelectFiller,
+    NativeSelectFiller,
+    RadioCheckboxFiller,
+    StandardInputFiller,
+)
+from applypilot.domain.base import TriState
+from applypilot.domain.profile import AssetRecord, CandidateProfile
+from applypilot.modules.apply.mapper import FieldMapper
+from applypilot.modules.profile.resolver import ValueResolver
+
+
+# =============================================================================
+# 1. FileUploadFiller Tests
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_file_upload_filler_can_handle():
+    filler = FileUploadFiller()
+    assert await filler.can_handle(None, {"field_type": "file"}) is True
+    assert await filler.can_handle(None, {"field_type": "upload"}) is True
+    assert await filler.can_handle(None, {"type": "file"}) is True
+    assert await filler.can_handle(None, {"widget": "upload"}) is True
+    assert await filler.can_handle(None, {"field_type": "text"}) is False
+
+
+@pytest.mark.asyncio
+async def test_file_upload_filler_success(tmp_path: Path):
+    test_file = tmp_path / "resume.pdf"
+    test_file.write_text("dummy resume content", encoding="utf-8")
+
+    filler = FileUploadFiller()
+    mock_el = AsyncMock()
+    mock_el.set_files = AsyncMock()
+    mock_page = AsyncMock()
+
+    # Pass Path
+    res = await filler.fill(mock_page, mock_el, test_file)
+    assert res.success is True
+    assert res.action_type == "set_files"
+    assert res.observed_value == str(test_file)
+    assert res.verification_status == "verified_match"
+    mock_el.set_files.assert_awaited_with([str(test_file)])
+
+    # Pass AssetRecord
+    mock_el.set_files.reset_mock()
+    asset = AssetRecord(
+        asset_id="asset_01",
+        asset_type="resume_pdf",
+        file_path=str(test_file),
+        title="Resume",
+    )
+    res = await filler.fill(mock_page, mock_el, asset)
+    assert res.success is True
+    mock_el.set_files.assert_awaited_with([str(test_file)])
+
+    # Pass list of paths
+    mock_el.set_files.reset_mock()
+    res = await filler.fill(mock_page, mock_el, [str(test_file)])
+    assert res.success is True
+    mock_el.set_files.assert_awaited_with([str(test_file)])
+
+
+@pytest.mark.asyncio
+async def test_file_upload_filler_missing_file(tmp_path: Path):
+    missing_file = tmp_path / "not_found.pdf"
+    filler = FileUploadFiller()
+    mock_el = AsyncMock()
+    mock_el.set_files = AsyncMock()
+    mock_page = AsyncMock()
+
+    res = await filler.fill(mock_page, mock_el, missing_file)
+    assert res.success is False
+    assert res.error_code == "FILE_NOT_FOUND"
+    assert res.recoverable is False
+    mock_el.set_files.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_file_upload_filler_not_interactable(tmp_path: Path):
+    test_file = tmp_path / "resume.pdf"
+    test_file.write_text("dummy resume content", encoding="utf-8")
+
+    filler = FileUploadFiller()
+    mock_el = object()  # Lacks set_files
+    mock_page = AsyncMock()
+
+    res = await filler.fill(mock_page, mock_el, test_file)
+    assert res.success is False
+    assert res.error_code == "ELEMENT_NOT_INTERACTABLE"
+    assert res.recoverable is False
+
+
+@pytest.mark.asyncio
+async def test_file_upload_filler_exception_handling(tmp_path: Path):
+    test_file = tmp_path / "resume.pdf"
+    test_file.write_text("dummy resume content", encoding="utf-8")
+
+    filler = FileUploadFiller()
+    mock_el = AsyncMock()
+    mock_el.set_files = AsyncMock(side_effect=RuntimeError("Browser upload rejected"))
+    mock_page = AsyncMock()
+
+    res = await filler.fill(mock_page, mock_el, test_file)
+    assert res.success is False
+    assert res.error_code == "FILE_UPLOAD_ERROR"
+    assert res.recoverable is True
+
+
+# =============================================================================
+# 2. NativeSelectFiller Tests
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_native_select_filler_can_handle():
+    filler = NativeSelectFiller()
+    assert await filler.can_handle(None, {"field_type": "select"}) is True
+    assert await filler.can_handle(None, {"tag": "select"}) is True
+    assert await filler.can_handle(None, {"field_type": "text"}) is False
+
+
+@pytest.mark.asyncio
+async def test_native_select_filler_success():
+    filler = NativeSelectFiller()
+    mock_el = AsyncMock()
+    mock_el.select_option = AsyncMock()
+    mock_page = AsyncMock()
+
+    res = await filler.fill(mock_page, mock_el, "硕士研究生")
+    assert res.success is True
+    assert res.action_type == "select_option"
+    assert res.observed_value == "硕士研究生"
+    assert res.verification_status == "verified_match"
+    mock_el.select_option.assert_awaited_with("硕士研究生")
+
+
+@pytest.mark.asyncio
+async def test_native_select_filler_enum_value():
+    filler = NativeSelectFiller()
+    mock_el = AsyncMock()
+    mock_el.select_option = AsyncMock()
+    mock_page = AsyncMock()
+
+    res = await filler.fill(mock_page, mock_el, TriState.YES)
+    assert res.success is True
+    mock_el.select_option.assert_awaited_with("yes")
+
+
+@pytest.mark.asyncio
+async def test_native_select_filler_not_interactable():
+    filler = NativeSelectFiller()
+    mock_el = object()  # Lacks select_option
+    mock_page = AsyncMock()
+
+    res = await filler.fill(mock_page, mock_el, "北京")
+    assert res.success is False
+    assert res.error_code == "ELEMENT_NOT_INTERACTABLE"
+    assert res.recoverable is False
+
+
+# =============================================================================
+# 3. RadioCheckboxFiller Tests
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_radio_checkbox_filler_can_handle():
+    filler = RadioCheckboxFiller()
+    assert await filler.can_handle(None, {"field_type": "radio"}) is True
+    assert await filler.can_handle(None, {"field_type": "checkbox"}) is True
+    assert await filler.can_handle(None, {"type": "radio"}) is True
+    assert await filler.can_handle(None, {"type": "checkbox"}) is True
+    assert await filler.can_handle(None, {"field_type": "text"}) is False
+
+
+@pytest.mark.asyncio
+async def test_radio_checkbox_filler_success():
+    filler = RadioCheckboxFiller()
+    mock_el = AsyncMock()
+    mock_el.click = AsyncMock()
+    mock_page = AsyncMock()
+
+    res = await filler.fill(mock_page, mock_el, "同意")
+    assert res.success is True
+    assert res.action_type == "click"
+    assert res.observed_value == "同意"
+    assert res.verification_status == "verified_match"
+    mock_el.click.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_radio_checkbox_filler_not_interactable():
+    filler = RadioCheckboxFiller()
+    mock_el = object()  # Lacks click
+    mock_page = AsyncMock()
+
+    res = await filler.fill(mock_page, mock_el, "同意")
+    assert res.success is False
+    assert res.error_code == "ELEMENT_NOT_INTERACTABLE"
+    assert res.recoverable is False
+
+
+# =============================================================================
+# 4. Adapter Default Fillers Registration Tests
+# =============================================================================
+
+def test_adapters_default_fillers():
+    generic_adapter = GenericApplicationAdapter()
+    filler_types = [type(f) for f in generic_adapter.fillers]
+    assert FileUploadFiller in filler_types
+    assert NativeSelectFiller in filler_types
+    assert RadioCheckboxFiller in filler_types
+    assert StandardInputFiller in filler_types
+
+    beisen_adapter = BeisenApplicationAdapter()
+    b_types = [type(f) for f in beisen_adapter.fillers]
+    assert BeisenModalSchoolPicker in b_types
+    assert FileUploadFiller in b_types
+    assert NativeSelectFiller in b_types
+    assert RadioCheckboxFiller in b_types
+    assert StandardInputFiller in b_types
+
+    moka_adapter = MokaApplicationAdapter()
+    m_types = [type(f) for f in moka_adapter.fillers]
+    assert MokaSearchSelectFiller in m_types
+    assert FileUploadFiller in m_types
+    assert NativeSelectFiller in m_types
+    assert RadioCheckboxFiller in m_types
+    assert StandardInputFiller in m_types
+
+
+# =============================================================================
+# 5. FieldMapper Canonical Exact Rules for Resume Upload Tests
+# =============================================================================
+
+def test_field_mapper_resume_upload_rules():
+    labels = [
+        "上传简历",
+        "简历附件",
+        "简历上传",
+        "个人简历",
+        "附件简历",
+        "上传附件",
+        "简历",
+        "resume",
+        "cv",
+    ]
+    for label in labels:
+        path, method, conf = FieldMapper.map_field(
+            field_sig=label,
+            normalized_label=label,
+            field_type="file",
+        )
+        assert path == "assets[asset_resume_pdf].file_path", f"Failed for {label}"
+        assert method == "exact_rule"
+        assert conf == 1.0
+
+
+# =============================================================================
+# 6. ValueResolver Asset Path & Fallback Tests
+# =============================================================================
+
+def test_value_resolver_assets_exact_id():
+    profile = CandidateProfile(
+        profile_id="cand_assets_01",
+        assets=[
+            AssetRecord(
+                asset_id="asset_resume_pdf",
+                asset_type="resume_pdf",
+                file_path="/path/to/my_resume.pdf",
+                title="简历",
+            )
+        ],
+    )
+    val = ValueResolver.resolve(profile, None, "assets[asset_resume_pdf].file_path")
+    assert val == "/path/to/my_resume.pdf"
+
+
+def test_value_resolver_assets_fallback_by_type():
+    # asset_id does not match "asset_resume_pdf", but asset_type is "resume_pdf"
+    profile = CandidateProfile(
+        profile_id="cand_assets_02",
+        assets=[
+            AssetRecord(
+                asset_id="custom_id_999",
+                asset_type="resume_pdf",
+                file_path="/path/to/fallback_resume.pdf",
+                title="简历",
+            )
+        ],
+    )
+    val = ValueResolver.resolve(profile, None, "assets[asset_resume_pdf].file_path")
+    assert val == "/path/to/fallback_resume.pdf"
+
+
+def test_value_resolver_assets_fallback_by_pdf_extension():
+    # asset_id and asset_type are non-standard, but extension is .pdf
+    profile = CandidateProfile(
+        profile_id="cand_assets_03",
+        assets=[
+            AssetRecord(
+                asset_id="custom_cert",
+                asset_type="certificate",
+                file_path="/path/to/certificate.png",
+                title="证书",
+            ),
+            AssetRecord(
+                asset_id="my_pdf",
+                asset_type="custom",
+                file_path="/path/to/document.pdf",
+                title="文档",
+            ),
+        ],
+    )
+    val = ValueResolver.resolve(profile, None, "assets[asset_resume_pdf].file_path")
+    assert val == "/path/to/document.pdf"
+
+
+def test_value_resolver_assets_fallback_to_first_asset():
+    profile = CandidateProfile(
+        profile_id="cand_assets_04",
+        assets=[
+            AssetRecord(
+                asset_id="custom_doc",
+                asset_type="custom",
+                file_path="/path/to/doc.docx",
+                title="文档",
+            )
+        ],
+    )
+    val = ValueResolver.resolve(profile, None, "assets[asset_resume_pdf].file_path")
+    assert val == "/path/to/doc.docx"
+
+
+@pytest.mark.asyncio
+async def test_apply_engine_sniffs_select_and_file_elements(tmp_path: Path):
+    db_file = tmp_path / "test.db"
+    from applypilot.storage.database import init_db
+    await init_db(db_file)
+
+    mock_browser = AsyncMock()
+    mock_page = AsyncMock()
+    mock_browser.open_page.return_value = mock_page
+
+    select_el = AsyncMock()
+    select_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {
+            "name": "学历",
+            "tagName": "select",
+            "value": "",
+        }.get(attr)
+    )
+    select_el.get_text = AsyncMock(return_value="")
+    select_el.select_option = AsyncMock()
+
+    file_el = AsyncMock()
+    file_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {
+            "name": "上传简历",
+            "type": "file",
+        }.get(attr)
+    )
+    file_el.get_text = AsyncMock(return_value="")
+    file_el.set_files = AsyncMock()
+
+    mock_page.find_all = AsyncMock(return_value=[select_el, file_el])
+
+    from applypilot.modules.apply.engine import ApplyEngine
+    from applypilot.domain.job import ApplicationTarget, Job
+    from applypilot.domain.profile import CandidateProfile, EducationRecord, EducationLevel
+
+    resume_path = tmp_path / "resume.pdf"
+    resume_path.write_text("content", encoding="utf-8")
+
+    engine = ApplyEngine(db_path=db_file, browser_backend=mock_browser)
+    from applypilot.domain.base import PartialDate
+    profile = CandidateProfile(
+        profile_id="cand_test",
+        education=[
+            EducationRecord(
+                id="edu_01",
+                school_name="清华大学",
+                education_level=EducationLevel.BACHELOR,
+                major="CS",
+                start_date=PartialDate(year=2018, month=9),
+                end_date=PartialDate(year=2022, month=6),
+            )
+        ],
+        assets=[AssetRecord(asset_id="asset_resume_pdf", asset_type="resume_pdf", file_path=str(resume_path), title="简历")],
+    )
+    target = ApplicationTarget(
+        target_id="tgt_test",
+        job=Job(
+            job_id="job_test",
+            title="Dev",
+            company_name="Company",
+            description_raw="desc",
+            source_channel="url",
+            source_url="http://example.com",
+            apply_url="http://example.com",
+        ),
+        provider="generic",
+    )
+
+    await engine.run_application_target(target, profile)
+    file_el.set_files.assert_awaited_with([str(resume_path)])
+    select_el.select_option.assert_awaited_with("bachelor")

@@ -104,6 +104,16 @@ CANONICAL_EXACT_RULES: dict[str, str] = {
     "政治面貌": "soe_extended.political_status",
     "籍贯": "soe_extended.native_place",
     "籍贯所在地": "soe_extended.native_place",
+    # 附件与简历 (assets)
+    "上传简历": "assets[asset_resume_pdf].file_path",
+    "简历附件": "assets[asset_resume_pdf].file_path",
+    "简历上传": "assets[asset_resume_pdf].file_path",
+    "个人简历": "assets[asset_resume_pdf].file_path",
+    "附件简历": "assets[asset_resume_pdf].file_path",
+    "上传附件": "assets[asset_resume_pdf].file_path",
+    "简历": "assets[asset_resume_pdf].file_path",
+    "resume": "assets[asset_resume_pdf].file_path",
+    "cv": "assets[asset_resume_pdf].file_path",
 }
 
 TARGET_CITY_EXCLUDES = ("期望", "意向", "目标", "应聘", "首选", "备选", "工作")

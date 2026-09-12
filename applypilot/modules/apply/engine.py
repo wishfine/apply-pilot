@@ -312,8 +312,53 @@ class ApplyEngine:
                                 else None
                             )
 
+                            tag_name = None
+                            if hasattr(element, "get_attribute"):
+                                try:
+                                    t_val = await element.get_attribute("tagName")
+                                    if not t_val:
+                                        t_val = await element.get_attribute("tag")
+                                    if isinstance(t_val, str):
+                                        tag_name = t_val
+                                except Exception:
+                                    pass
+                            if tag_name is None and hasattr(element, "evaluate"):
+                                try:
+                                    t_val = await element.evaluate("el => el.tagName")
+                                    if isinstance(t_val, str):
+                                        tag_name = t_val
+                                except Exception:
+                                    pass
+                            if tag_name is None and hasattr(element, "tag_name"):
+                                try:
+                                    if isinstance(element.tag_name, str):
+                                        tag_name = element.tag_name
+                                    elif inspect.iscoroutinefunction(element.tag_name):
+                                        t_val = await element.tag_name()
+                                        if isinstance(t_val, str):
+                                            tag_name = t_val
+                                    elif callable(element.tag_name):
+                                        t_val = element.tag_name()
+                                        if inspect.iscoroutine(t_val) or inspect.isawaitable(t_val):
+                                            t_val = await t_val
+                                        if isinstance(t_val, str):
+                                            tag_name = t_val
+                                except Exception:
+                                    pass
+
                             label = aria_label or title_attr or name_attr or placeholder or id_attr or ""
-                            field_type = type_attr or "text"
+                            tag_str = str(tag_name).strip().lower() if tag_name else ""
+                            type_str = str(type_attr).strip().lower() if type_attr else ""
+
+                            if tag_str == "select" or type_str in ("select", "select-one", "select-multiple"):
+                                field_type = "select"
+                            elif type_str == "file":
+                                field_type = "file"
+                            elif type_str in ("radio", "checkbox"):
+                                field_type = type_str
+                            else:
+                                field_type = type_str or "text"
+
                             field_sig = id_attr or name_attr or aria_label or label
 
                             # Collect element attributes for requirement detection
@@ -402,6 +447,8 @@ class ApplyEngine:
                                                 "field_type": field_type,
                                                 "field_sig": field_sig,
                                                 "label": label,
+                                                "type": type_str,
+                                                "tag": tag_str,
                                             },
                                             expected,
                                         )
