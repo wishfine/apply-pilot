@@ -9,6 +9,9 @@ Implements tri-level decision engine:
 
 from __future__ import annotations
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from typing import Any, NamedTuple, Optional, Sequence
 
 
@@ -27,19 +30,25 @@ class FieldMappingResult(NamedTuple):
 _TAGS_TO_REMOVE = (
     "(必填)",
     "（必填）",
+    "【必填】",
+    "[必填]",
     "(选填)",
     "（选填）",
+    "【选填】",
+    "[选填]",
     "(必填项)",
     "（必填项）",
+    "【必填项】",
     "(选填项)",
     "（选填项）",
+    "【选填项】",
     "(必)",
     "（必）",
     "(选)",
     "（选）",
 )
 
-_CHARS_TO_REMOVE = ("*", ":", "：", "•", "·")
+_CHARS_TO_REMOVE = ("*", ":", "：", "•", "·", "【", "】", "[", "]")
 
 CANONICAL_EXACT_RULES: dict[str, str] = {
     # 身份 (identity)
@@ -53,6 +62,7 @@ CANONICAL_EXACT_RULES: dict[str, str] = {
     "证件号": "identity.id_number",
     "身份证": "identity.id_number",
     "证件号码": "identity.id_number",
+    "民族": "identity.ethnicity",
     # 联系方式 (contact)
     "手机号": "contact.mobile",
     "手机号码": "contact.mobile",
@@ -94,8 +104,9 @@ CANONICAL_EXACT_RULES: dict[str, str] = {
     "政治面貌": "soe_extended.political_status",
     "籍贯": "soe_extended.native_place",
     "籍贯所在地": "soe_extended.native_place",
-    "民族": "soe_extended.ethnicity",
 }
+
+TARGET_CITY_EXCLUDES = ("期望", "意向", "目标", "应聘", "首选", "备选", "工作")
 
 
 def _clean_label(label: str) -> str:
@@ -111,9 +122,9 @@ def _clean_label(label: str) -> str:
 
 
 def _extract_item_value(item: Any, *keys: str, default: Any = None) -> Any:
-    """Retrieve attribute or dict key from item."""
+    """Retrieve attribute or dict/Mapping key from item."""
     for key in keys:
-        if isinstance(item, dict):
+        if isinstance(item, Mapping):
             if key in item and item[key] is not None:
                 return item[key]
         elif hasattr(item, key):
@@ -151,6 +162,10 @@ class FieldMapper:
         # -----------------------------------------------------------------
         if correction_memories:
             for mem in correction_memories:
+                enabled = _extract_item_value(mem, "enabled", default=True)
+                if enabled is False or enabled == 0:
+                    continue
+
                 mem_label = _extract_item_value(
                     mem, "normalized_label", "label", "field_label"
                 )
@@ -160,17 +175,14 @@ class FieldMapper:
                 if _clean_label(str(mem_label)) != clean_key:
                     continue
 
-                # Check section scope constraint
+                # Check section scope constraint with normalized comparison
                 mem_section = _extract_item_value(
                     mem, "section_title", "section_signature", "section"
                 )
                 if mem_section:
-                    mem_sec_str = str(mem_section).strip()
-                    if mem_sec_str:
-                        if (
-                            not section_title
-                            or str(section_title).strip() != mem_sec_str
-                        ):
+                    mem_sec_clean = _clean_label(str(mem_section))
+                    if mem_sec_clean:
+                        if not section_title or _clean_label(str(section_title)) != mem_sec_clean:
                             continue
 
                 corrected_path = _extract_item_value(
@@ -207,6 +219,44 @@ class FieldMapper:
         # -----------------------------------------------------------------
         # Tier 3: Semantic / Keyword Heuristics
         # -----------------------------------------------------------------
+        # Name heuristics
+        if ("姓名" in clean_key or "名字" in clean_key) and "紧急" not in clean_key:
+            if "英文" in clean_key or "english" in clean_key:
+                return FieldMappingResult(
+                    profile_path="identity.english_name",
+                    method="semantic",
+                    confidence=0.85,
+                )
+            return FieldMappingResult(
+                profile_path="identity.name",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        # Gender heuristic
+        if "性别" in clean_key:
+            return FieldMappingResult(
+                profile_path="identity.gender",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        # Dates heuristics
+        if "入学" in clean_key and any(k in clean_key for k in ("时间", "日期", "年月")):
+            return FieldMappingResult(
+                profile_path="education[__HIGHEST__].start_date",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        if "毕业" in clean_key and any(k in clean_key for k in ("时间", "日期", "年月")):
+            return FieldMappingResult(
+                profile_path="education[__HIGHEST__].end_date",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        # Emergency contacts (with '关系' exclusion)
         if "紧急" in clean_key:
             if "手机" in clean_key or "电话" in clean_key:
                 return FieldMappingResult(
@@ -214,7 +264,7 @@ class FieldMapper:
                     method="semantic",
                     confidence=0.85,
                 )
-            if "联系人" in clean_key or "姓名" in clean_key:
+            if ("联系人" in clean_key or "姓名" in clean_key) and "关系" not in clean_key:
                 return FieldMappingResult(
                     profile_path="contact.emergency_contact_name",
                     method="semantic",
@@ -234,14 +284,16 @@ class FieldMapper:
                 confidence=0.85,
             )
 
-        if "院校" in clean_key or "学校" in clean_key:
+        if ("院校" in clean_key or "学校" in clean_key) and not any(
+            k in clean_key for k in ("性质", "类型", "类别", "排名")
+        ):
             return FieldMappingResult(
                 profile_path="education[__HIGHEST__].school_name",
                 method="semantic",
                 confidence=0.85,
             )
 
-        if "专业" in clean_key:
+        if "专业" in clean_key and not any(k in clean_key for k in ("排名", "性质", "类别")):
             return FieldMappingResult(
                 profile_path="education[__HIGHEST__].major",
                 method="semantic",
@@ -290,7 +342,9 @@ class FieldMapper:
                 confidence=0.85,
             )
 
-        if "绩点" in clean_key or "gpa" in clean_key:
+        if ("绩点" in clean_key or "gpa" in clean_key) and not any(
+            k in clean_key for k in ("满分", "比例", "制度", "scale")
+        ):
             return FieldMappingResult(
                 profile_path="education[__HIGHEST__].gpa",
                 method="semantic",
@@ -299,12 +353,21 @@ class FieldMapper:
 
         if "民族" in clean_key:
             return FieldMappingResult(
-                profile_path="soe_extended.ethnicity",
+                profile_path="identity.ethnicity",
                 method="semantic",
                 confidence=0.85,
             )
 
-        if "城市" in clean_key or "居住地" in clean_key:
+        # Current residence city (strictly excluding target/intent job locations)
+        if any(ex in clean_key for ex in TARGET_CITY_EXCLUDES):
+            pass
+        elif "现居" in clean_key or "居住" in clean_key or "当前城市" in clean_key or "所在地" in clean_key:
+            return FieldMappingResult(
+                profile_path="contact.current_city",
+                method="semantic",
+                confidence=0.85,
+            )
+        elif "城市" in clean_key and not any(w in clean_key for w in ("学校", "院校", "出生", "籍贯")):
             return FieldMappingResult(
                 profile_path="contact.current_city",
                 method="semantic",

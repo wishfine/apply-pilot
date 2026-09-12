@@ -83,7 +83,7 @@ def test_exact_canonical_rules_all_standard_labels():
         ("政治面貌", "soe_extended.political_status"),
         ("籍贯", "soe_extended.native_place"),
         ("籍贯所在地", "soe_extended.native_place"),
-        ("民族", "soe_extended.ethnicity"),
+        ("民族", "identity.ethnicity"),
         ("紧急联系人", "contact.emergency_contact_name"),
         ("紧急联系人姓名", "contact.emergency_contact_name"),
         ("紧急联系人电话", "contact.emergency_contact_phone"),
@@ -278,3 +278,48 @@ def test_unmapped_fallback():
         assert path is None
         assert method == "unmapped"
         assert conf == 0.0
+
+
+def test_target_city_not_mapped_to_current_city():
+    # Target / Desired job location cities must NOT map to current residence city
+    target_city_labels = [
+        "期望工作城市",
+        "意向城市",
+        "目标城市",
+        "应聘城市",
+        "工作城市",
+    ]
+    for label in target_city_labels:
+        res = FieldMapper.map_field(
+            field_sig="sig_target_city",
+            normalized_label=label,
+        )
+        assert res.profile_path != "contact.current_city"
+
+
+def test_semantic_name_gender_and_dates():
+    # Variations of name, gender, and education dates
+    assert FieldMapper.map_field("s1", "真实姓名").profile_path == "identity.name"
+    assert FieldMapper.map_field("s2", "您的性别").profile_path == "identity.gender"
+    assert FieldMapper.map_field("s3", "入学年月").profile_path == "education[__HIGHEST__].start_date"
+    assert FieldMapper.map_field("s4", "预计毕业时间").profile_path == "education[__HIGHEST__].end_date"
+
+
+def test_disabled_correction_memory_ignored():
+    disabled_memory = [
+        {
+            "normalized_label": "手机号",
+            "corrected_semantic_path": "custom.mobile",
+            "enabled": False,
+            "confidence": 1.0,
+        }
+    ]
+    res = FieldMapper.map_field(
+        field_sig="sig_m",
+        normalized_label="手机号",
+        correction_memories=disabled_memory,
+    )
+    # Since memory is disabled, falls through to exact rule
+    assert res.profile_path == "contact.mobile"
+    assert res.method == "exact_rule"
+
