@@ -253,7 +253,16 @@ def test_apply_run_interactive_readiness_writeback_choice(
             optional_empty_fields=0,
             all_items=[],
         )
-        res = await fake_engine.readiness_resolver(None, report, profile, None)
+        mock_el = AsyncMock()
+        mock_el.clear_text = AsyncMock()
+        mock_el.type_text = AsyncMock()
+        mock_page = AsyncMock()
+        mock_page.find = AsyncMock(return_value=mock_el)
+
+        fake_engine.mock_el = mock_el
+        fake_engine.mock_page = mock_page
+
+        res = await fake_engine.readiness_resolver(mock_page, report, profile, None)
         if res is True:
             return ApplicationStatus.READY_REVIEW
         return ApplicationStatus.PAUSED
@@ -290,8 +299,47 @@ def test_apply_run_interactive_readiness_writeback_choice(
         )
         assert res.exit_code == 0
         assert "已同步回写" in res.stdout
+        # Verify file content
         content = yaml.safe_load(sample_profile_file.read_text(encoding="utf-8"))
         assert content["contact"]["current_city"] == "广州"
+        # Verify DOM element interaction
+        fake_engine.mock_page.find.assert_awaited()
+        fake_engine.mock_el.type_text.assert_awaited_with("广州")
+
+
+def test_apply_run_configures_user_prompt_handler(
+    sample_profile_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("APPLYPILOT_HOME", str(tmp_path))
+
+    mock_browser = AsyncMock()
+    mock_browser.close = AsyncMock()
+
+    with (
+        patch("applypilot.cli.main.PlaywrightBackend", return_value=mock_browser) as mock_backend_cls,
+        patch(
+            "applypilot.cli.main.ApplyEngine.run_application_target",
+            new_callable=AsyncMock,
+            return_value=ApplicationStatus.READY_REVIEW,
+        ),
+    ):
+        res = runner.invoke(
+            app,
+            [
+                "apply",
+                "run",
+                "-u",
+                "https://jobs.bytedance.com/campus/123",
+                "-p",
+                str(sample_profile_file),
+                "--headless",
+            ],
+        )
+        assert res.exit_code == 0
+        mock_backend_cls.assert_called_once()
+        _, kwargs = mock_backend_cls.call_args
+        handler = kwargs.get("user_prompt_handler")
+        assert handler is not None and callable(handler)
 
 
 def test_apply_run_interactive_readiness_browser_fill_choice(

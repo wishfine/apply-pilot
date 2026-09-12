@@ -191,6 +191,26 @@ def profile_import(
         raise typer.Exit(code=1)
 
 
+def _update_in_memory_profile(prof: Any, path: str, val: Any) -> None:
+    """Navigate dot-separated profile path and update attribute in-memory."""
+    if not path or "[" in path or "]" in path:
+        return
+    parts = path.strip().split(".")
+    target = prof
+    for part in parts[:-1]:
+        if hasattr(target, part):
+            target = getattr(target, part)
+        elif isinstance(target, dict) and part in target:
+            target = target[part]
+        else:
+            return
+    last_key = parts[-1]
+    if hasattr(target, last_key):
+        setattr(target, last_key, val)
+    elif isinstance(target, dict):
+        target[last_key] = val
+
+
 @apply_app.command("run")
 def apply_run(
     job_url: str = typer.Option(..., "--job-url", "-u", help="Job recruitment URL"),
@@ -225,9 +245,8 @@ def apply_run(
         # 2. Load and validate profile
         profile = _load_profile(prof_path)
 
-        # 3. Ensure local database initialized
+        # 3. Local database path
         db_path = get_db_path()
-        asyncio.run(init_db(db_path))
 
         # 4. Build Job and ApplicationTarget
         domain = urlparse(job_url).netloc or "target_company"
@@ -242,97 +261,148 @@ def apply_run(
         )
         target = ApplicationTarget(target_id=f"tgt_{uuid.uuid4().hex[:8]}", job=job)
 
-        # 5. Instantiate PlaywrightBackend
-        browser = PlaywrightBackend(headless=headless, user_data_dir=get_browser_dir())
+        # 5. Single async event loop runner driving the entire execution session
+        async def _run_session() -> None:
+            await init_db(db_path)
+            browser = PlaywrightBackend(
+                headless=headless,
+                user_data_dir=get_browser_dir(),
+                user_prompt_handler=lambda reason: typer.prompt(
+                    f"\n[ApplyPilot] {reason}\n[按回车键继续]",
+                    default="",
+                    show_default=False,
+                ),
+            )
 
-        # 6. Define CLI terminal readiness resolver
-        async def terminal_readiness_resolver(
-            page: Any,
-            report: ReadinessReport,
-            prof: CandidateProfile,
-            var: Optional[ResumeVariant],
-        ) -> Any:
-            table = Table(title="⚠️  阶段就绪度诊断：发现必填项缺失", border_style="yellow")
-            table.add_column("字段标识", style="cyan")
-            table.add_column("表单标签", style="bold")
-            table.add_column("所属板块", style="magenta")
-            table.add_column("建议修复", style="green")
-            for item in report.missing_required:
-                table.add_row(
-                    item.field_sig,
-                    item.label,
-                    item.section_title or "-",
-                    item.suggested_fix or "-",
-                )
-            console.print(table)
-            console.print("\n请选择处理方式：")
-            console.print("[bold cyan][1][/bold cyan] 切换至浏览器手动补填")
-            console.print("[bold cyan][2][/bold cyan] 终端逐项即时补全并回写档案")
-            console.print("[bold cyan][3][/bold cyan] 暂停并退出本次网申 (PAUSED)")
-            choice = typer.prompt("请输入选项 [1/2/3]", default="1")
-            if choice == "3":
-                return ApplicationStatus.PAUSED
-            elif choice == "2":
+            async def terminal_readiness_resolver(
+                page: Any,
+                report: ReadinessReport,
+                prof: CandidateProfile,
+                var: Optional[ResumeVariant],
+            ) -> Any:
+                table = Table(title="⚠️  阶段就绪度诊断：发现必填项缺失", border_style="yellow")
+                table.add_column("字段标识", style="cyan")
+                table.add_column("表单标签", style="bold")
+                table.add_column("所属板块", style="magenta")
+                table.add_column("建议修复", style="green")
                 for item in report.missing_required:
-                    val = typer.prompt(f"请输入 [{item.label}]")
-                    if val and item.profile_path:
-                        try:
-                            ProfileWritebackSynchronizer.sync_field(
-                                prof_path, item.profile_path, val
-                            )
-                            console.print(
-                                f"[green]已同步回写 {item.profile_path} = {val}[/green]"
-                            )
-                        except Exception as e:
-                            console.print(f"[yellow]回写失败: {e}[/yellow]")
-                return True
-            else:
-                if hasattr(browser, "wait_for_user"):
-                    wait_res = browser.wait_for_user(
-                        "请在已打开的浏览器中完成上述必填项填写，完成后按回车继续..."
+                    table.add_row(
+                        item.field_sig,
+                        item.label,
+                        item.section_title or "-",
+                        item.suggested_fix or "-",
                     )
-                    if inspect.isawaitable(wait_res):
-                        await wait_res
-                return True
+                console.print(table)
+                console.print("\n请选择处理方式：")
+                console.print("[bold cyan][1][/bold cyan] 切换至浏览器手动补填")
+                console.print("[bold cyan][2][/bold cyan] 终端逐项即时补全并回写档案")
+                console.print("[bold cyan][3][/bold cyan] 暂停并退出本次网申 (PAUSED)")
+                choice = typer.prompt("请输入选项 [1/2/3]", default="1")
+                if choice == "3":
+                    return ApplicationStatus.PAUSED
+                elif choice == "2":
+                    for item in report.missing_required:
+                        val = typer.prompt(f"请输入 [{item.label}]")
+                        if val:
+                            if item.profile_path:
+                                try:
+                                    ProfileWritebackSynchronizer.sync_field(
+                                        prof_path, item.profile_path, val
+                                    )
+                                    console.print(
+                                        f"[green]已同步回写 {item.profile_path} = {val}[/green]"
+                                    )
+                                except Exception as e:
+                                    console.print(f"[yellow]回写失败: {e}[/yellow]")
 
-        # 7. Run ApplyEngine
-        engine = ApplyEngine(
-            db_path=db_path,
-            browser_backend=browser,
-            interactive_readiness=interactive_readiness,
-            readiness_resolver=terminal_readiness_resolver if interactive_readiness else None,
-        )
-        try:
-            status = asyncio.run(engine.run_application_target(target, profile))
-            if status == ApplicationStatus.READY_REVIEW:
-                console.print(
-                    Panel(
-                        "[bold green]🎉 表单已自动化填写完毕！已进入终审阶段 (READY_REVIEW)。[/bold green]\n"
-                        "请在已打开的浏览器中核对各项表单，核对无误后请亲自点击提交。",
-                        title="终审确认",
-                        border_style="green",
+                                try:
+                                    _update_in_memory_profile(prof, item.profile_path, val)
+                                except Exception:
+                                    pass
+
+                            # Fill into DOM page element if element is accessible
+                            if page is not None and hasattr(page, "find"):
+                                element = None
+                                for sel in (
+                                    f"#{item.field_sig}",
+                                    f"[name='{item.field_sig}']",
+                                    item.field_sig,
+                                    f"[id*='{item.field_sig}']",
+                                    f"[name*='{item.field_sig}']",
+                                ):
+                                    try:
+                                        res = page.find(sel)
+                                        if inspect.isawaitable(res):
+                                            res = await res
+                                        if res:
+                                            element = res
+                                            break
+                                    except Exception:
+                                        continue
+
+                                if element is not None:
+                                    try:
+                                        if hasattr(element, "clear_text"):
+                                            c_res = element.clear_text()
+                                            if inspect.isawaitable(c_res):
+                                                await c_res
+                                        if hasattr(element, "type_text"):
+                                            t_res = element.type_text(str(val))
+                                            if inspect.isawaitable(t_res):
+                                                await t_res
+                                    except Exception as e:
+                                        console.print(f"[yellow]页面控件填充提示: {e}[/yellow]")
+
+                    return True
+                else:
+                    if hasattr(browser, "wait_for_user"):
+                        wait_res = browser.wait_for_user(
+                            "请在已打开的浏览器中完成上述必填项填写，完成后按回车继续..."
+                        )
+                        if inspect.isawaitable(wait_res):
+                            await wait_res
+                    return True
+
+            engine = ApplyEngine(
+                db_path=db_path,
+                browser_backend=browser,
+                interactive_readiness=interactive_readiness,
+                readiness_resolver=terminal_readiness_resolver if interactive_readiness else None,
+            )
+            try:
+                status = await engine.run_application_target(target, profile)
+                if status == ApplicationStatus.READY_REVIEW:
+                    console.print(
+                        Panel(
+                            "[bold green]🎉 表单已自动化填写完毕！已进入终审阶段 (READY_REVIEW)。[/bold green]\n"
+                            "请在已打开的浏览器中核对各项表单，核对无误后请亲自点击提交。",
+                            title="终审确认",
+                            border_style="green",
+                        )
                     )
-                )
-                if not headless and hasattr(browser, "wait_for_user"):
-                    wait_res = browser.wait_for_user(
-                        "请在浏览器中核对并点击提交。提交完毕后，按回车退出浏览器..."
+                    if not headless and hasattr(browser, "wait_for_user"):
+                        wait_res = browser.wait_for_user(
+                            "请在浏览器中核对并点击提交。提交完毕后，按回车退出浏览器..."
+                        )
+                        if inspect.isawaitable(wait_res):
+                            await wait_res
+                elif status == ApplicationStatus.PAUSED:
+                    console.print(
+                        Panel(
+                            "[bold yellow]⏸️  网申已暂停 (PAUSED)，已保存阶段断点 Checkpoint。[/bold yellow]\n"
+                            "后续可通过 track 查看或恢复。",
+                            title="网申暂停",
+                            border_style="yellow",
+                        )
                     )
-                    if inspect.isawaitable(wait_res):
-                        asyncio.run(wait_res)
-            elif status == ApplicationStatus.PAUSED:
-                console.print(
-                    Panel(
-                        "[bold yellow]⏸️  网申已暂停 (PAUSED)，已保存阶段断点 Checkpoint。[/bold yellow]\n"
-                        "后续可通过 track 查看或恢复。",
-                        title="网申暂停",
-                        border_style="yellow",
-                    )
-                )
-        finally:
-            if hasattr(browser, "close"):
-                close_res = browser.close()
-                if inspect.isawaitable(close_res):
-                    asyncio.run(close_res)
+            finally:
+                if hasattr(browser, "close"):
+                    close_res = browser.close()
+                    if inspect.isawaitable(close_res):
+                        await close_res
+
+        asyncio.run(_run_session())
+
     except typer.Exit:
         raise
     except Exception as e:
