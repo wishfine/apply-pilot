@@ -3,6 +3,7 @@
 from applypilot.domain.job import ApplicationStatus
 from applypilot.modules.apply.engine import ApplyEngine
 from applypilot.modules.apply.mapper import FieldMapper, FieldMappingResult
+from applypilot.modules.apply.readiness import FormRequirementDetector
 from applypilot.modules.apply.normalizer import (
     ValueKind,
     ValueNormalizerRegistry,
@@ -23,6 +24,7 @@ __all__ = [
     "ApplyEngine",
     "FieldMapper",
     "FieldMappingResult",
+    "FormRequirementDetector",
 
     "ValueKind",
     "ValueNormalizerRegistry",
