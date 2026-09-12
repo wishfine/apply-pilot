@@ -85,27 +85,50 @@ def test_profile_show_command(tmp_path: Path):
     assert "王五" in res.stdout
 
 
-def test_apply_run_command_output():
-    res = runner.invoke(
-        app,
-        ["apply", "run", "--job-url", "https://jobs.example.com/apply/123"],
-    )
-    assert res.exit_code == 0
-    assert "https://jobs.example.com/apply/123" in res.stdout
-    assert "Interactive readiness: True" in res.stdout
+def test_apply_run_command_output(tmp_path: Path, monkeypatch):
+    from unittest.mock import AsyncMock, patch
+    from applypilot.domain.job import ApplicationStatus
 
-    res_non_interactive = runner.invoke(
-        app,
-        [
-            "apply",
-            "run",
-            "--job-url",
-            "https://jobs.example.com/apply/123",
-            "--no-interactive-readiness",
-        ],
-    )
-    assert res_non_interactive.exit_code == 0
-    assert "Interactive readiness: False" in res_non_interactive.stdout
+    profile_data = {
+        "profile_id": "cand_smoke_01",
+        "identity": {"name": "张三", "gender": "male", "birth_date": "2000-01-01"},
+        "contact": {"mobile": "13800000000", "email": "zhangsan@example.com"},
+    }
+    profile_file = tmp_path / "profile.yaml"
+    profile_file.write_text(json.dumps(profile_data), encoding="utf-8")
+    monkeypatch.setenv("APPLYPILOT_HOME", str(tmp_path))
+
+    mock_browser = AsyncMock()
+
+    with (
+        patch("applypilot.cli.main.PlaywrightBackend", return_value=mock_browser),
+        patch(
+            "applypilot.cli.main.ApplyEngine.run_application_target",
+            new_callable=AsyncMock,
+            return_value=ApplicationStatus.READY_REVIEW,
+        ),
+    ):
+        res = runner.invoke(
+            app,
+            ["apply", "run", "--job-url", "https://jobs.example.com/apply/123"],
+        )
+        assert res.exit_code == 0
+        assert "https://jobs.example.com/apply/123" in res.stdout
+        assert "Interactive readiness: True" in res.stdout
+
+        res_non_interactive = runner.invoke(
+            app,
+            [
+                "apply",
+                "run",
+                "--job-url",
+                "https://jobs.example.com/apply/123",
+                "--no-interactive-readiness",
+                "--headless",
+            ],
+        )
+        assert res_non_interactive.exit_code == 0
+        assert "Interactive readiness: False" in res_non_interactive.stdout
 
 
 def test_track_list_command():

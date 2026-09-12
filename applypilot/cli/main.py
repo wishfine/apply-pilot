@@ -9,21 +9,34 @@ Provides CLI command groups:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
+import uuid
 
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 import typer
 import yaml
 
-from applypilot.core.config import get_app_home_dir, get_db_path
+from applypilot.browser import PlaywrightBackend
+from applypilot.core.config import get_app_home_dir, get_browser_dir, get_db_path
+from applypilot.domain.job import ApplicationStatus, ApplicationTarget, Job
 from applypilot.domain.profile import CandidateProfile
+from applypilot.domain.variant import ResumeVariant
+from applypilot.modules.apply.engine import ApplyEngine
+from applypilot.modules.apply.readiness import (
+    ProfileWritebackSynchronizer,
+    ReadinessReport,
+)
 from applypilot.modules.profile.ingestion import (
     ResumeIngestionError,
     ResumeIngestionService,
 )
+from applypilot.storage.database import init_db
 from applypilot.storage.repositories import ApplicationRepository, EventRepository
 
 app = typer.Typer(
@@ -199,6 +212,132 @@ def apply_run(
     console.print(f"Interactive readiness: {interactive_readiness}")
     if profile_path:
         console.print(f"Using profile from: {profile_path}")
+
+    try:
+        # 1. Locate candidate profile
+        prof_path = profile_path or (get_app_home_dir() / "profile.yaml")
+        if not prof_path.exists():
+            console.print(
+                f"[bold red]Profile file not found at: {prof_path}. Please create one or import using 'applypilot profile import -f <resume>'.[/bold red]"
+            )
+            raise typer.Exit(code=1)
+
+        # 2. Load and validate profile
+        profile = _load_profile(prof_path)
+
+        # 3. Ensure local database initialized
+        db_path = get_db_path()
+        asyncio.run(init_db(db_path))
+
+        # 4. Build Job and ApplicationTarget
+        domain = urlparse(job_url).netloc or "target_company"
+        job = Job(
+            job_id=f"job_{uuid.uuid4().hex[:8]}",
+            title=f"Application at {domain}",
+            company_name=domain,
+            description_raw="Automated job application via ApplyPilot CLI",
+            source_channel="url",
+            source_url=job_url,
+            apply_url=job_url,
+        )
+        target = ApplicationTarget(target_id=f"tgt_{uuid.uuid4().hex[:8]}", job=job)
+
+        # 5. Instantiate PlaywrightBackend
+        browser = PlaywrightBackend(headless=headless, user_data_dir=get_browser_dir())
+
+        # 6. Define CLI terminal readiness resolver
+        async def terminal_readiness_resolver(
+            page: Any,
+            report: ReadinessReport,
+            prof: CandidateProfile,
+            var: Optional[ResumeVariant],
+        ) -> Any:
+            table = Table(title="⚠️  阶段就绪度诊断：发现必填项缺失", border_style="yellow")
+            table.add_column("字段标识", style="cyan")
+            table.add_column("表单标签", style="bold")
+            table.add_column("所属板块", style="magenta")
+            table.add_column("建议修复", style="green")
+            for item in report.missing_required:
+                table.add_row(
+                    item.field_sig,
+                    item.label,
+                    item.section_title or "-",
+                    item.suggested_fix or "-",
+                )
+            console.print(table)
+            console.print("\n请选择处理方式：")
+            console.print("[bold cyan][1][/bold cyan] 切换至浏览器手动补填")
+            console.print("[bold cyan][2][/bold cyan] 终端逐项即时补全并回写档案")
+            console.print("[bold cyan][3][/bold cyan] 暂停并退出本次网申 (PAUSED)")
+            choice = typer.prompt("请输入选项 [1/2/3]", default="1")
+            if choice == "3":
+                return ApplicationStatus.PAUSED
+            elif choice == "2":
+                for item in report.missing_required:
+                    val = typer.prompt(f"请输入 [{item.label}]")
+                    if val and item.profile_path:
+                        try:
+                            ProfileWritebackSynchronizer.sync_field(
+                                prof_path, item.profile_path, val
+                            )
+                            console.print(
+                                f"[green]已同步回写 {item.profile_path} = {val}[/green]"
+                            )
+                        except Exception as e:
+                            console.print(f"[yellow]回写失败: {e}[/yellow]")
+                return True
+            else:
+                if hasattr(browser, "wait_for_user"):
+                    wait_res = browser.wait_for_user(
+                        "请在已打开的浏览器中完成上述必填项填写，完成后按回车继续..."
+                    )
+                    if inspect.isawaitable(wait_res):
+                        await wait_res
+                return True
+
+        # 7. Run ApplyEngine
+        engine = ApplyEngine(
+            db_path=db_path,
+            browser_backend=browser,
+            interactive_readiness=interactive_readiness,
+            readiness_resolver=terminal_readiness_resolver if interactive_readiness else None,
+        )
+        try:
+            status = asyncio.run(engine.run_application_target(target, profile))
+            if status == ApplicationStatus.READY_REVIEW:
+                console.print(
+                    Panel(
+                        "[bold green]🎉 表单已自动化填写完毕！已进入终审阶段 (READY_REVIEW)。[/bold green]\n"
+                        "请在已打开的浏览器中核对各项表单，核对无误后请亲自点击提交。",
+                        title="终审确认",
+                        border_style="green",
+                    )
+                )
+                if not headless and hasattr(browser, "wait_for_user"):
+                    wait_res = browser.wait_for_user(
+                        "请在浏览器中核对并点击提交。提交完毕后，按回车退出浏览器..."
+                    )
+                    if inspect.isawaitable(wait_res):
+                        asyncio.run(wait_res)
+            elif status == ApplicationStatus.PAUSED:
+                console.print(
+                    Panel(
+                        "[bold yellow]⏸️  网申已暂停 (PAUSED)，已保存阶段断点 Checkpoint。[/bold yellow]\n"
+                        "后续可通过 track 查看或恢复。",
+                        title="网申暂停",
+                        border_style="yellow",
+                    )
+                )
+        finally:
+            if hasattr(browser, "close"):
+                close_res = browser.close()
+                if inspect.isawaitable(close_res):
+                    asyncio.run(close_res)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(f"[bold red]Execution error: {e}[/bold red]")
+        raise typer.Exit(code=1)
 
 
 async def _query_applications(
