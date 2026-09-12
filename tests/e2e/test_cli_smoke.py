@@ -92,6 +92,20 @@ def test_apply_run_command_output():
     )
     assert res.exit_code == 0
     assert "https://jobs.example.com/apply/123" in res.stdout
+    assert "Interactive readiness: True" in res.stdout
+
+    res_non_interactive = runner.invoke(
+        app,
+        [
+            "apply",
+            "run",
+            "--job-url",
+            "https://jobs.example.com/apply/123",
+            "--no-interactive-readiness",
+        ],
+    )
+    assert res_non_interactive.exit_code == 0
+    assert "Interactive readiness: False" in res_non_interactive.stdout
 
 
 def test_track_list_command():

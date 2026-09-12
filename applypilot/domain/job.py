@@ -11,6 +11,7 @@ class ApplicationStatus(StrEnum):
 
     CREATED = "created"
     IN_PROGRESS = "in_progress"
+    PAUSED = "paused"
     READY_REVIEW = "ready_review"
     SUBMITTED = "submitted"
     WITHDRAWN = "withdrawn"

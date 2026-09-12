@@ -187,10 +187,16 @@ def apply_run(
     headless: bool = typer.Option(
         False, "--headless", help="Run browser in headless mode"
     ),
+    interactive_readiness: bool = typer.Option(
+        True,
+        "--interactive-readiness/--no-interactive-readiness",
+        help="Enable interactive resolution for missing required fields",
+    ),
 ) -> None:
     """Automate job application form filling and human review."""
     console.print(f"[bold blue]Starting ApplyPilot session for: {job_url}[/bold blue]")
     console.print(f"Headless mode: {headless}")
+    console.print(f"Interactive readiness: {interactive_readiness}")
     if profile_path:
         console.print(f"Using profile from: {profile_path}")
 

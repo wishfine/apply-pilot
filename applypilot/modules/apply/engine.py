@@ -7,9 +7,10 @@ typed value resolution, disclosure gate, element filling, and human checkpoint h
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union
 import uuid
 
 from applypilot.adapters.applications.base import ApplicationAdapter
@@ -22,6 +23,7 @@ from applypilot.domain.profile import CandidateProfile
 from applypilot.domain.variant import DisclosurePolicy, ResumeVariant
 from applypilot.modules.apply.mapper import FieldMapper
 from applypilot.modules.apply.normalizer import ValueKind, ValueNormalizerRegistry
+from applypilot.modules.apply.readiness import FormRequirementDetector, ReadinessAuditor
 from applypilot.modules.profile.resolver import ValueResolver
 from applypilot.storage.repositories import (
     ApplicationRepository,
@@ -44,10 +46,14 @@ class ApplyEngine:
         adapters: Optional[Dict[str, ApplicationAdapter]] = None,
         mapper: Optional[Any] = None,
         resolver: Optional[Any] = None,
+        interactive_readiness: bool = True,
+        readiness_resolver: Optional[Callable] = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.browser = browser_backend
         self.browser_backend = browser_backend
+        self.interactive_readiness = interactive_readiness
+        self.readiness_resolver = readiness_resolver
 
         # Repositories
         self.app_repo = ApplicationRepository(self.db_path)
@@ -264,6 +270,8 @@ class ApplyEngine:
                     stage_key=current_stage,
                 )
 
+                stage_scanned_fields: list[dict[str, Any]] = []
+
                 if hasattr(page, "find_all"):
                     elements = await page.find_all(
                         "input:not([type='hidden']), select, textarea"
@@ -304,6 +312,47 @@ class ApplyEngine:
                         field_type = type_attr or "text"
                         field_sig = id_attr or name_attr or aria_label or label
 
+                        # Collect element attributes for requirement detection
+                        element_attrs: dict[str, Any] = {}
+                        if hasattr(element, "get_attribute"):
+                            for attr_name in (
+                                "required",
+                                "aria-required",
+                                "type",
+                                "name",
+                                "id",
+                                "placeholder",
+                                "class",
+                            ):
+                                try:
+                                    attr_val = await element.get_attribute(attr_name)
+                                    if attr_val is not None:
+                                        element_attrs[attr_name] = attr_val
+                                except Exception:
+                                    pass
+
+                        outer_html = None
+                        if hasattr(element, "get_attribute"):
+                            try:
+                                o_val = await element.get_attribute("outerHTML")
+                                if isinstance(o_val, str):
+                                    outer_html = o_val
+                            except Exception:
+                                pass
+                        if outer_html is None and hasattr(element, "evaluate"):
+                            try:
+                                o_val = await element.evaluate("el => el.outerHTML")
+                                if isinstance(o_val, str):
+                                    outer_html = o_val
+                            except Exception:
+                                pass
+
+                        is_required = FormRequirementDetector.is_field_required(
+                            element_attrs=element_attrs,
+                            label=label,
+                            outer_html=outer_html,
+                        )
+
                         map_res = self.mapper.map_field(
                             field_sig=field_sig,
                             normalized_label=label,
@@ -329,15 +378,15 @@ class ApplyEngine:
                             disclosure_allowed=disclosure_allowed,
                         )
 
+                        observed = None
+                        if hasattr(element, "get_text"):
+                            observed = await element.get_text()
+                        if not observed and hasattr(element, "get_attribute"):
+                            observed = await element.get_attribute("value")
+
                         if path and disclosure_allowed:
                             expected = self.resolver.resolve(profile, variant, path)
                             if expected is not None:
-                                observed = None
-                                if hasattr(element, "get_text"):
-                                    observed = await element.get_text()
-                                if not observed and hasattr(element, "get_attribute"):
-                                    observed = await element.get_attribute("value")
-
                                 kind = self._infer_value_kind(path)
                                 if not ValueNormalizerRegistry.are_equivalent(
                                     kind, observed, expected
@@ -376,6 +425,71 @@ class ApplyEngine:
                                         value_preview=obs_val,
                                         error_code=err_code,
                                     )
+                                    if getattr(res, "observed_value", None) is not None:
+                                        observed = res.observed_value
+                                    elif getattr(res, "success", True):
+                                        observed = expected
+
+                        stage_scanned_fields.append({
+                            "field_sig": field_sig,
+                            "label": label,
+                            "section_title": current_stage,
+                            "is_required": is_required,
+                            "mapped_path": path,
+                            "observed_value": observed,
+                            "element_attrs": element_attrs,
+                            "outer_html": outer_html,
+                        })
+
+                # Stage readiness diagnostics and interactive resolution
+                report = ReadinessAuditor.audit_fields(
+                    stage_scanned_fields, profile, variant
+                )
+                if not report.is_ready:
+                    await self.event_repo.append_event(
+                        event_id=f"evt_{uuid.uuid4().hex[:12]}",
+                        run_id=run_id,
+                        event_type="READINESS_AUDIT_HALTED",
+                        payload_json={
+                            "stage": current_stage,
+                            "missing_required": [
+                                item.model_dump(mode="json")
+                                for item in report.missing_required
+                            ],
+                        },
+                    )
+                    if self.interactive_readiness:
+                        if self.readiness_resolver is not None:
+                            res = self.readiness_resolver(
+                                page, report, profile, variant
+                            )
+                            if inspect.iscoroutine(res) or inspect.isawaitable(res):
+                                await res
+                        else:
+                            missing_labels = ", ".join(
+                                item.label or item.field_sig
+                                for item in report.missing_required
+                            )
+                            await self.browser.wait_for_user(
+                                f"阶段【{current_stage}】存在 {len(report.missing_required)} 个必填缺失项：{missing_labels}，请在浏览器中核对补填"
+                            )
+                    else:
+                        await self.app_repo.update_status(
+                            app_id, ApplicationStatus.PAUSED
+                        )
+                        await self.app_repo.update_run_status(run_id, "paused")
+                        chk_id = f"chk_{uuid.uuid4().hex[:12]}"
+                        await self.chk_repo.save_checkpoint(
+                            checkpoint_id=chk_id,
+                            application_id=app_id,
+                            run_id=run_id,
+                            page_url=target_url,
+                            stage_key=current_stage,
+                            snapshot_id=snap_id,
+                            completed_fields_json=[],
+                            status="paused",
+                        )
+                        return ApplicationStatus.PAUSED
 
                 chk_id = f"chk_{uuid.uuid4().hex[:12]}"
                 await self.chk_repo.save_checkpoint(
