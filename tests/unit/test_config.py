@@ -19,6 +19,12 @@ def test_app_home_dir_resolution():
     home = get_app_home_dir()
     assert isinstance(home, Path)
     assert "ApplyPilot" in str(home) or "applypilot" in str(home)
+
+def test_app_home_dir_env_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPLYPILOT_HOME", str(tmp_path / "custom_home"))
+    home = get_app_home_dir()
+    assert home == tmp_path / "custom_home"
+    assert home.exists()
     assert home.is_dir()
 
 

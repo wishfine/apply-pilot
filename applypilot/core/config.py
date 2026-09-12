@@ -1,9 +1,11 @@
+import os
 from pathlib import Path
 from platformdirs import user_data_dir
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 def get_app_home_dir() -> Path:
-    base = Path(user_data_dir("ApplyPilot", "ApplyPilot"))
+    env_home = os.getenv("APPLYPILOT_HOME")
+    base = Path(env_home) if env_home else Path(user_data_dir("ApplyPilot", "ApplyPilot"))
     base.mkdir(parents=True, exist_ok=True)
     return base
 
