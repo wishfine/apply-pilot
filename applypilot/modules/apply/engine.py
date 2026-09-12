@@ -9,9 +9,12 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from applypilot.adapters.applications.base import ApplicationAdapter
 from applypilot.adapters.applications.beisen import BeisenApplicationAdapter
@@ -277,169 +280,177 @@ class ApplyEngine:
                         "input:not([type='hidden']), select, textarea"
                     )
                     for element in elements:
-                        aria_label = (
-                            await element.get_attribute("aria-label")
-                            if hasattr(element, "get_attribute")
-                            else None
-                        )
-                        title_attr = (
-                            await element.get_attribute("title")
-                            if hasattr(element, "get_attribute")
-                            else None
-                        )
-                        name_attr = (
-                            await element.get_attribute("name")
-                            if hasattr(element, "get_attribute")
-                            else None
-                        )
-                        placeholder = (
-                            await element.get_attribute("placeholder")
-                            if hasattr(element, "get_attribute")
-                            else None
-                        )
-                        id_attr = (
-                            await element.get_attribute("id")
-                            if hasattr(element, "get_attribute")
-                            else None
-                        )
-                        type_attr = (
-                            await element.get_attribute("type")
-                            if hasattr(element, "get_attribute")
-                            else None
-                        )
+                        try:
+                            aria_label = (
+                                await element.get_attribute("aria-label")
+                                if hasattr(element, "get_attribute")
+                                else None
+                            )
+                            title_attr = (
+                                await element.get_attribute("title")
+                                if hasattr(element, "get_attribute")
+                                else None
+                            )
+                            name_attr = (
+                                await element.get_attribute("name")
+                                if hasattr(element, "get_attribute")
+                                else None
+                            )
+                            placeholder = (
+                                await element.get_attribute("placeholder")
+                                if hasattr(element, "get_attribute")
+                                else None
+                            )
+                            id_attr = (
+                                await element.get_attribute("id")
+                                if hasattr(element, "get_attribute")
+                                else None
+                            )
+                            type_attr = (
+                                await element.get_attribute("type")
+                                if hasattr(element, "get_attribute")
+                                else None
+                            )
 
-                        label = aria_label or title_attr or name_attr or placeholder or id_attr or ""
-                        field_type = type_attr or "text"
-                        field_sig = id_attr or name_attr or aria_label or label
+                            label = aria_label or title_attr or name_attr or placeholder or id_attr or ""
+                            field_type = type_attr or "text"
+                            field_sig = id_attr or name_attr or aria_label or label
 
-                        # Collect element attributes for requirement detection
-                        element_attrs: dict[str, Any] = {}
-                        if hasattr(element, "get_attribute"):
-                            for attr_name in (
-                                "required",
-                                "aria-required",
-                                "type",
-                                "name",
-                                "id",
-                                "placeholder",
-                                "class",
-                            ):
+                            # Collect element attributes for requirement detection
+                            element_attrs: dict[str, Any] = {}
+                            if hasattr(element, "get_attribute"):
+                                for attr_name in (
+                                    "required",
+                                    "aria-required",
+                                    "type",
+                                    "name",
+                                    "id",
+                                    "placeholder",
+                                    "class",
+                                ):
+                                    try:
+                                        attr_val = await element.get_attribute(attr_name)
+                                        if attr_val is not None:
+                                            element_attrs[attr_name] = attr_val
+                                    except Exception:
+                                        pass
+
+                            outer_html = None
+                            if hasattr(element, "get_attribute"):
                                 try:
-                                    attr_val = await element.get_attribute(attr_name)
-                                    if attr_val is not None:
-                                        element_attrs[attr_name] = attr_val
+                                    o_val = await element.get_attribute("outerHTML")
+                                    if isinstance(o_val, str):
+                                        outer_html = o_val
+                                except Exception:
+                                    pass
+                            if outer_html is None and hasattr(element, "evaluate"):
+                                try:
+                                    o_val = await element.evaluate("el => el.outerHTML")
+                                    if isinstance(o_val, str):
+                                        outer_html = o_val
                                 except Exception:
                                     pass
 
-                        outer_html = None
-                        if hasattr(element, "get_attribute"):
-                            try:
-                                o_val = await element.get_attribute("outerHTML")
-                                if isinstance(o_val, str):
-                                    outer_html = o_val
-                            except Exception:
-                                pass
-                        if outer_html is None and hasattr(element, "evaluate"):
-                            try:
-                                o_val = await element.evaluate("el => el.outerHTML")
-                                if isinstance(o_val, str):
-                                    outer_html = o_val
-                            except Exception:
-                                pass
+                            is_required = FormRequirementDetector.is_field_required(
+                                element_attrs=element_attrs,
+                                label=label,
+                                outer_html=outer_html,
+                            )
 
-                        is_required = FormRequirementDetector.is_field_required(
-                            element_attrs=element_attrs,
-                            label=label,
-                            outer_html=outer_html,
-                        )
+                            map_res = self.mapper.map_field(
+                                field_sig=field_sig,
+                                normalized_label=label,
+                                section_title=current_stage,
+                                field_type=field_type,
+                                correction_memories=corrections,
+                            )
+                            path, method, conf = map_res
 
-                        map_res = self.mapper.map_field(
-                            field_sig=field_sig,
-                            normalized_label=label,
-                            section_title=current_stage,
-                            field_type=field_type,
-                            correction_memories=corrections,
-                        )
-                        path, method, conf = map_res
+                            mapping_id = f"map_{uuid.uuid4().hex[:12]}"
+                            disclosure_allowed = (
+                                self._check_disclosure(target.disclosure_policy, path)
+                                if path
+                                else False
+                            )
+                            await self.snap_repo.save_field_mapping(
+                                mapping_id=mapping_id,
+                                snapshot_id=snap_id,
+                                field_signature=field_sig,
+                                profile_path=path,
+                                method=method,
+                                confidence=conf,
+                                disclosure_allowed=disclosure_allowed,
+                            )
 
-                        mapping_id = f"map_{uuid.uuid4().hex[:12]}"
-                        disclosure_allowed = (
-                            self._check_disclosure(target.disclosure_policy, path)
-                            if path
-                            else False
-                        )
-                        await self.snap_repo.save_field_mapping(
-                            mapping_id=mapping_id,
-                            snapshot_id=snap_id,
-                            field_signature=field_sig,
-                            profile_path=path,
-                            method=method,
-                            confidence=conf,
-                            disclosure_allowed=disclosure_allowed,
-                        )
+                            observed = None
+                            if hasattr(element, "get_text"):
+                                observed = await element.get_text()
+                            if not observed and hasattr(element, "get_attribute"):
+                                observed = await element.get_attribute("value")
 
-                        observed = None
-                        if hasattr(element, "get_text"):
-                            observed = await element.get_text()
-                        if not observed and hasattr(element, "get_attribute"):
-                            observed = await element.get_attribute("value")
+                            if path and disclosure_allowed:
+                                expected = self.resolver.resolve(profile, variant, path)
+                                if expected is not None:
+                                    kind = self._infer_value_kind(path)
+                                    if not ValueNormalizerRegistry.are_equivalent(
+                                        kind, observed, expected
+                                    ):
+                                        res = await adapter.fill_field(
+                                            page,
+                                            element,
+                                            {
+                                                "field_type": field_type,
+                                                "field_sig": field_sig,
+                                                "label": label,
+                                            },
+                                            expected,
+                                        )
+                                        action_type = str(getattr(res, "action_type", "type_text"))
+                                        status_str = "success" if getattr(res, "success", True) else "failed"
+                                        obs_val = (
+                                            str(res.observed_value)[:64]
+                                            if getattr(res, "observed_value", None) is not None
+                                            else None
+                                        )
+                                        err_code = (
+                                            str(res.error_code)
+                                            if getattr(res, "error_code", None) is not None
+                                            else None
+                                        )
+                                        await self.snap_repo.save_field_action(
+                                            action_id=f"act_{uuid.uuid4().hex[:12]}",
+                                            run_id=run_id,
+                                            snapshot_id=snap_id,
+                                            field_signature=field_sig,
+                                            mapping_id=mapping_id,
+                                            action_type=action_type,
+                                            status=status_str,
+                                            duration_ms=50,
+                                            value_preview=obs_val,
+                                            error_code=err_code,
+                                        )
+                                        if getattr(res, "observed_value", None) is not None:
+                                            observed = res.observed_value
+                                        elif getattr(res, "success", True):
+                                            observed = expected
 
-                        if path and disclosure_allowed:
-                            expected = self.resolver.resolve(profile, variant, path)
-                            if expected is not None:
-                                kind = self._infer_value_kind(path)
-                                if not ValueNormalizerRegistry.are_equivalent(
-                                    kind, observed, expected
-                                ):
-                                    res = await adapter.fill_field(
-                                        page,
-                                        element,
-                                        {
-                                            "field_type": field_type,
-                                            "field_sig": field_sig,
-                                            "label": label,
-                                        },
-                                        expected,
-                                    )
-                                    action_type = str(getattr(res, "action_type", "type_text"))
-                                    status_str = "success" if getattr(res, "success", True) else "failed"
-                                    obs_val = (
-                                        str(res.observed_value)[:64]
-                                        if getattr(res, "observed_value", None) is not None
-                                        else None
-                                    )
-                                    err_code = (
-                                        str(res.error_code)
-                                        if getattr(res, "error_code", None) is not None
-                                        else None
-                                    )
-                                    await self.snap_repo.save_field_action(
-                                        action_id=f"act_{uuid.uuid4().hex[:12]}",
-                                        run_id=run_id,
-                                        snapshot_id=snap_id,
-                                        field_signature=field_sig,
-                                        mapping_id=mapping_id,
-                                        action_type=action_type,
-                                        status=status_str,
-                                        duration_ms=50,
-                                        value_preview=obs_val,
-                                        error_code=err_code,
-                                    )
-                                    if getattr(res, "observed_value", None) is not None:
-                                        observed = res.observed_value
-                                    elif getattr(res, "success", True):
-                                        observed = expected
-
-                        stage_scanned_fields.append({
-                            "field_sig": field_sig,
-                            "label": label,
-                            "section_title": current_stage,
-                            "is_required": is_required,
-                            "mapped_path": path,
-                            "observed_value": observed,
-                            "element_attrs": element_attrs,
-                            "outer_html": outer_html,
-                        })
+                            stage_scanned_fields.append({
+                                "field_sig": field_sig,
+                                "label": label,
+                                "section_title": current_stage,
+                                "is_required": is_required,
+                                "mapped_path": path,
+                                "observed_value": observed,
+                                "element_attrs": element_attrs,
+                                "outer_html": outer_html,
+                            })
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to inspect or process form element on stage '%s': %s",
+                                current_stage,
+                                e,
+                            )
+                            continue
 
                 # Stage readiness diagnostics and interactive resolution
                 report = ReadinessAuditor.audit_fields(
@@ -464,7 +475,26 @@ class ApplyEngine:
                                 page, report, profile, variant
                             )
                             if inspect.iscoroutine(res) or inspect.isawaitable(res):
-                                await res
+                                res = await res
+                            if res == ApplicationStatus.PAUSED or res is False:
+                                await self.app_repo.update_status(
+                                    app_id,
+                                    ApplicationStatus.PAUSED,
+                                    current_stage=current_stage,
+                                )
+                                await self.app_repo.update_run_status(run_id, "paused")
+                                chk_id = f"chk_{uuid.uuid4().hex[:12]}"
+                                await self.chk_repo.save_checkpoint(
+                                    checkpoint_id=chk_id,
+                                    application_id=app_id,
+                                    run_id=run_id,
+                                    page_url=target_url,
+                                    stage_key=current_stage,
+                                    snapshot_id=snap_id,
+                                    completed_fields_json=[],
+                                    status="paused",
+                                )
+                                return ApplicationStatus.PAUSED
                         else:
                             missing_labels = ", ".join(
                                 item.label or item.field_sig
@@ -475,7 +505,7 @@ class ApplyEngine:
                             )
                     else:
                         await self.app_repo.update_status(
-                            app_id, ApplicationStatus.PAUSED
+                            app_id, ApplicationStatus.PAUSED, current_stage=current_stage
                         )
                         await self.app_repo.update_run_status(run_id, "paused")
                         chk_id = f"chk_{uuid.uuid4().hex[:12]}"
@@ -549,7 +579,9 @@ class ApplyEngine:
                 status="ready_review",
             )
 
-            await self.app_repo.update_status(app_id, ApplicationStatus.READY_REVIEW)
+            await self.app_repo.update_status(
+                app_id, ApplicationStatus.READY_REVIEW, current_stage="final_review"
+            )
             await self.app_repo.update_run_status(run_id, "paused")
 
             await self.event_repo.append_event(

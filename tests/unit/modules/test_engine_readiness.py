@@ -261,3 +261,159 @@ async def test_all_required_fields_present_advances_without_halting(tmp_path: Pa
     # Only one call to wait_for_user: the final review handoff
     assert mock_browser.wait_for_user.await_count == 1
     assert "表单字段已填写完毕" in mock_browser.wait_for_user.await_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_readiness_resolver_returning_paused_pauses_application(tmp_path: Path):
+    db_file = tmp_path / "test.db"
+    await init_db(db_file)
+    mock_browser, mock_page = _create_mock_browser_and_page()
+
+    mock_el = AsyncMock()
+    mock_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {
+            "name": "手机号",
+            "type": "text",
+            "id": "mobile_field",
+            "required": "required",
+            "value": "",
+        }.get(attr)
+    )
+    mock_el.get_text = AsyncMock(return_value="")
+    mock_page.find_all = AsyncMock(return_value=[mock_el])
+
+    # Custom resolver cancels / requests pause
+    custom_resolver = AsyncMock(return_value=ApplicationStatus.PAUSED)
+
+    engine = ApplyEngine(
+        db_path=db_file,
+        browser_backend=mock_browser,
+        interactive_readiness=True,
+        readiness_resolver=custom_resolver,
+    )
+    profile = _create_sample_profile(mobile=None)
+    target = _create_sample_target(provider="generic")
+
+    status = await engine.run_application_target(target, profile)
+    assert status == ApplicationStatus.PAUSED
+
+    # Assert application in DB has current_stage and PAUSED status
+    app_repo = ApplicationRepository(db_file)
+    app = await app_repo.get_application(f"app_{target.job.job_id}")
+    assert app is not None
+    assert app["status"] == ApplicationStatus.PAUSED
+    assert app["current_stage"] == "single_page"
+
+    # Assert checkpoint saved with status "paused"
+    chk_repo = CheckpointRepository(db_file)
+    latest_chk = await chk_repo.get_latest_checkpoint(f"app_{target.job.job_id}")
+    assert latest_chk is not None
+    assert latest_chk["status"] == "paused"
+    assert latest_chk["stage_key"] == "single_page"
+
+
+@pytest.mark.asyncio
+async def test_readiness_resolver_returning_false_pauses_application(tmp_path: Path):
+    db_file = tmp_path / "test.db"
+    await init_db(db_file)
+    mock_browser, mock_page = _create_mock_browser_and_page()
+
+    mock_el = AsyncMock()
+    mock_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {
+            "name": "手机号",
+            "type": "text",
+            "id": "mobile_field",
+            "required": "required",
+            "value": "",
+        }.get(attr)
+    )
+    mock_el.get_text = AsyncMock(return_value="")
+    mock_page.find_all = AsyncMock(return_value=[mock_el])
+
+    custom_resolver = AsyncMock(return_value=False)
+
+    engine = ApplyEngine(
+        db_path=db_file,
+        browser_backend=mock_browser,
+        interactive_readiness=True,
+        readiness_resolver=custom_resolver,
+    )
+    profile = _create_sample_profile(mobile=None)
+    target = _create_sample_target(provider="generic")
+
+    status = await engine.run_application_target(target, profile)
+    assert status == ApplicationStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_sync_readiness_resolver_invoked(tmp_path: Path):
+    db_file = tmp_path / "test.db"
+    await init_db(db_file)
+    mock_browser, mock_page = _create_mock_browser_and_page()
+
+    mock_el = AsyncMock()
+    mock_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {
+            "name": "手机号",
+            "type": "text",
+            "id": "mobile_field",
+            "required": "required",
+            "value": "",
+        }.get(attr)
+    )
+    mock_el.get_text = AsyncMock(return_value="")
+    mock_page.find_all = AsyncMock(return_value=[mock_el])
+
+    sync_called = []
+
+    def sync_resolver(page, report, profile, variant):
+        sync_called.append((page, report, profile))
+        return True
+
+    engine = ApplyEngine(
+        db_path=db_file,
+        browser_backend=mock_browser,
+        interactive_readiness=True,
+        readiness_resolver=sync_resolver,
+    )
+    profile = _create_sample_profile(mobile=None)
+    target = _create_sample_target(provider="generic")
+
+    status = await engine.run_application_target(target, profile)
+    assert status == ApplicationStatus.READY_REVIEW
+    assert len(sync_called) == 1
+
+
+@pytest.mark.asyncio
+async def test_detached_element_does_not_crash_engine(tmp_path: Path):
+    db_file = tmp_path / "test.db"
+    await init_db(db_file)
+    mock_browser, mock_page = _create_mock_browser_and_page()
+
+    # First element throws detached error
+    mock_detached_el = AsyncMock()
+    mock_detached_el.get_attribute = AsyncMock(side_effect=RuntimeError("Element detached from DOM"))
+
+    # Second element is normal valid element
+    mock_valid_el = AsyncMock()
+    mock_valid_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {
+            "name": "姓名",
+            "type": "text",
+            "id": "name_field",
+            "value": "张三",
+        }.get(attr)
+    )
+    mock_valid_el.get_text = AsyncMock(return_value="张三")
+
+    mock_page.find_all = AsyncMock(return_value=[mock_detached_el, mock_valid_el])
+
+    engine = ApplyEngine(db_path=db_file, browser_backend=mock_browser)
+    profile = _create_sample_profile(mobile="13800138000")
+    target = _create_sample_target(provider="generic")
+
+    # Should safely catch exception on detached element and complete successfully
+    status = await engine.run_application_target(target, profile)
+    assert status == ApplicationStatus.READY_REVIEW
+
