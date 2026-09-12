@@ -68,17 +68,22 @@ class BaseApplicationAdapter:
         """Delegate field filling to the first compatible component filler."""
         for filler in self.fillers:
             try:
-                if await filler.can_handle(element, field_info):
+                can_handle = await filler.can_handle(element, field_info)
+            except Exception:
+                continue
+
+            if can_handle:
+                try:
                     return await filler.fill(page, element, value)
-            except Exception as e:
-                return FillResult(
-                    success=False,
-                    action_type="unknown",
-                    error_code="FILLER_EXECUTION_ERROR",
-                    observed_value=None,
-                    verification_status="conflict",
-                    recoverable=True,
-                )
+                except Exception:
+                    return FillResult(
+                        success=False,
+                        action_type="unknown",
+                        error_code="FILLER_EXECUTION_ERROR",
+                        observed_value=None,
+                        verification_status="conflict",
+                        recoverable=True,
+                    )
 
         return FillResult(
             success=False,

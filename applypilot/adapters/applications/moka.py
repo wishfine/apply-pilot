@@ -20,6 +20,16 @@ class MokaSearchSelectFiller:
         return "search_select" in field_type or "search_select" in widget
 
     async def fill(self, page: Any, element: Any, value: Any) -> FillResult:
+        if not (hasattr(element, "click") or hasattr(element, "type_text")):
+            return FillResult(
+                success=False,
+                action_type="moka_search_select",
+                observed_value=None,
+                verification_status="unverified",
+                error_code="ELEMENT_NOT_INTERACTABLE",
+                recoverable=False,
+            )
+
         val_str = "" if value is None else str(value)
         try:
             # If element provides interactive hooks (click, type_text), trigger them
@@ -34,7 +44,7 @@ class MokaSearchSelectFiller:
                 observed_value=val_str,
                 verification_status="verified_match",
             )
-        except Exception as e:
+        except Exception:
             return FillResult(
                 success=False,
                 action_type="moka_search_select",
@@ -50,8 +60,11 @@ class MokaApplicationAdapter(BaseApplicationAdapter):
 
     def __init__(self, fillers: Optional[List[ComponentFiller]] = None) -> None:
         super().__init__(
-            fillers=fillers or [MokaSearchSelectFiller(), StandardInputFiller()]
+            fillers=fillers
+            if fillers is not None
+            else [MokaSearchSelectFiller(), StandardInputFiller()]
         )
+
 
     async def detect_stage(self, page: Any) -> str:
         return "moka_form"

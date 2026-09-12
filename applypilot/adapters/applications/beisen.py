@@ -25,6 +25,16 @@ class BeisenModalSchoolPicker:
         )
 
     async def fill(self, page: Any, element: Any, value: Any) -> FillResult:
+        if not (hasattr(element, "click") or hasattr(element, "type_text")):
+            return FillResult(
+                success=False,
+                action_type="beisen_modal_pick",
+                observed_value=None,
+                verification_status="unverified",
+                error_code="ELEMENT_NOT_INTERACTABLE",
+                recoverable=False,
+            )
+
         val_str = "" if value is None else str(value)
         try:
             # Trigger modal picker interaction if element has click
@@ -37,7 +47,7 @@ class BeisenModalSchoolPicker:
                 observed_value=val_str,
                 verification_status="verified_match",
             )
-        except Exception as e:
+        except Exception:
             return FillResult(
                 success=False,
                 action_type="beisen_modal_pick",
@@ -53,8 +63,11 @@ class BeisenApplicationAdapter(BaseApplicationAdapter):
 
     def __init__(self, fillers: Optional[List[ComponentFiller]] = None) -> None:
         super().__init__(
-            fillers=fillers or [BeisenModalSchoolPicker(), StandardInputFiller()]
+            fillers=fillers
+            if fillers is not None
+            else [BeisenModalSchoolPicker(), StandardInputFiller()]
         )
+
 
     async def detect_stage(self, page: Any) -> str:
         return "beisen_stage"

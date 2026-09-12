@@ -247,3 +247,103 @@ async def test_adapter_no_matching_filler():
     assert res.action_type == "none"
     assert res.error_code == "NO_MATCHING_FILLER"
     assert res.recoverable is False
+
+
+def test_protocol_conformance():
+    for adapter_cls in [
+        GenericApplicationAdapter,
+        MokaApplicationAdapter,
+        BeisenApplicationAdapter,
+    ]:
+        adapter = adapter_cls()
+        assert isinstance(adapter, ApplicationAdapter)
+
+    for filler_cls in [
+        StandardInputFiller,
+        MokaSearchSelectFiller,
+        BeisenModalSchoolPicker,
+    ]:
+        filler = filler_cls()
+        assert isinstance(filler, ComponentFiller)
+
+
+@pytest.mark.asyncio
+async def test_field_type_none_handling():
+    filler = StandardInputFiller()
+    mock_el = AsyncMock()
+    assert await filler.can_handle(mock_el, {"field_type": None}) is True
+
+
+@pytest.mark.asyncio
+async def test_non_interactive_elements_return_error():
+    mock_page = AsyncMock()
+    # Dummy object with no interactive methods
+    class NonInteractiveElement:
+        pass
+
+    non_interactive = NonInteractiveElement()
+
+    # StandardInputFiller
+    input_filler = StandardInputFiller()
+    res_input = await input_filler.fill(mock_page, non_interactive, "test")
+    assert res_input.success is False
+    assert res_input.error_code == "ELEMENT_NOT_INTERACTABLE"
+    assert res_input.recoverable is False
+
+    # MokaSearchSelectFiller
+    moka_filler = MokaSearchSelectFiller()
+    res_moka = await moka_filler.fill(mock_page, non_interactive, "test")
+    assert res_moka.success is False
+    assert res_moka.error_code == "ELEMENT_NOT_INTERACTABLE"
+    assert res_moka.recoverable is False
+
+    # BeisenModalSchoolPicker
+    beisen_filler = BeisenModalSchoolPicker()
+    res_beisen = await beisen_filler.fill(mock_page, non_interactive, "test")
+    assert res_beisen.success is False
+    assert res_beisen.error_code == "ELEMENT_NOT_INTERACTABLE"
+    assert res_beisen.recoverable is False
+
+
+@pytest.mark.asyncio
+async def test_can_handle_exception_resilient_fallback():
+    mock_page = AsyncMock()
+    mock_el = AsyncMock()
+
+    class FaultyFiller:
+        async def can_handle(self, element, field_info):
+            raise RuntimeError("DOM inspection failed")
+
+        async def fill(self, page, element, value):
+            raise AssertionError("Should not be called")
+
+    class WorkingFiller:
+        async def can_handle(self, element, field_info):
+            return True
+
+        async def fill(self, page, element, value):
+            return FillResult(
+                success=True,
+                action_type="custom_fill",
+                observed_value=str(value),
+                verification_status="verified_match",
+            )
+
+    adapter = BaseApplicationAdapter(fillers=[FaultyFiller(), WorkingFiller()])
+    res = await adapter.fill_field(mock_page, mock_el, {"field_type": "text"}, "hello")
+
+    assert res.success is True
+    assert res.action_type == "custom_fill"
+    assert res.observed_value == "hello"
+
+
+def test_explicit_empty_fillers_list():
+    gen = GenericApplicationAdapter(fillers=[])
+    assert gen.fillers == []
+
+    moka = MokaApplicationAdapter(fillers=[])
+    assert moka.fillers == []
+
+    beisen = BeisenApplicationAdapter(fillers=[])
+    assert beisen.fillers == []
+
