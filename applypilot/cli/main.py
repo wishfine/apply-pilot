@@ -199,10 +199,24 @@ def _update_in_memory_profile(prof: Any, path: str, val: Any) -> None:
     target = prof
     for part in parts[:-1]:
         if hasattr(target, part):
+            sub = getattr(target, part)
+            if sub is None:
+                if part == "soe_extended":
+                    from applypilot.domain.profile import SOEExtendedInfo
+
+                    sub = SOEExtendedInfo()
+                    setattr(target, part, sub)
             target = getattr(target, part)
-        elif isinstance(target, dict) and part in target:
+        elif isinstance(target, dict):
+            if part not in target or target[part] is None:
+                if part == "soe_extended":
+                    target[part] = {}
+                else:
+                    return
             target = target[part]
         else:
+            return
+        if target is None:
             return
     last_key = parts[-1]
     if hasattr(target, last_key):
@@ -380,12 +394,6 @@ def apply_run(
                             border_style="green",
                         )
                     )
-                    if not headless and hasattr(browser, "wait_for_user"):
-                        wait_res = browser.wait_for_user(
-                            "请在浏览器中核对并点击提交。提交完毕后，按回车退出浏览器..."
-                        )
-                        if inspect.isawaitable(wait_res):
-                            await wait_res
                 elif status == ApplicationStatus.PAUSED:
                     console.print(
                         Panel(

@@ -411,3 +411,65 @@ def test_apply_run_interactive_readiness_browser_fill_choice(
         )
         assert res.exit_code == 0
         mock_browser.wait_for_user.assert_awaited_once()
+
+
+def test_update_in_memory_profile_auto_instantiates_soe_extended():
+    from applypilot.cli.main import _update_in_memory_profile
+    from applypilot.domain.profile import CandidateProfile, SOEExtendedInfo
+
+    prof = CandidateProfile(profile_id="cand_test")
+    assert prof.soe_extended is None
+
+    _update_in_memory_profile(prof, "soe_extended.political_status", "中共党员")
+    assert prof.soe_extended is not None
+    assert isinstance(prof.soe_extended, SOEExtendedInfo)
+    assert prof.soe_extended.political_status == "中共党员"
+
+    # Subsequent update preserves existing instance
+    _update_in_memory_profile(prof, "soe_extended.native_place", "广东省广州市")
+    assert prof.soe_extended.political_status == "中共党员"
+    assert prof.soe_extended.native_place == "广东省广州市"
+
+    # Dict representation test
+    dict_prof = {}
+    _update_in_memory_profile(dict_prof, "soe_extended.political_status", "共青团员")
+    assert dict_prof["soe_extended"]["political_status"] == "共青团员"
+
+
+def test_apply_run_non_headless_no_duplicate_wait_for_user(
+    sample_profile_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("APPLYPILOT_HOME", str(tmp_path))
+
+    mock_browser = AsyncMock()
+    mock_browser.close = AsyncMock()
+    mock_browser.wait_for_user = AsyncMock()
+
+    with (
+        patch("applypilot.cli.main.PlaywrightBackend", return_value=mock_browser),
+        patch(
+            "applypilot.cli.main.ApplyEngine.run_application_target",
+            new_callable=AsyncMock,
+            return_value=ApplicationStatus.READY_REVIEW,
+        ) as mock_run_target,
+    ):
+        res = runner.invoke(
+            app,
+            [
+                "apply",
+                "run",
+                "-u",
+                "https://jobs.bytedance.com/campus/position/123",
+                "-p",
+                str(sample_profile_file),
+                # non-headless mode: no --headless flag
+            ],
+        )
+        assert res.exit_code == 0
+        assert "READY_REVIEW" in res.stdout
+        assert "终审确认" in res.stdout
+        mock_run_target.assert_awaited_once()
+        # main.py does not make a redundant wait_for_user call
+        mock_browser.wait_for_user.assert_not_called()
+        mock_browser.close.assert_awaited_once()
+
