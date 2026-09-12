@@ -10,7 +10,7 @@ class DomainValidationError(ApplyPilotError):
 class StorageError(ApplyPilotError):
     """存储与数据库异常"""
 
-class BrowserDriverError(ApplyPilotError):
+class BrowserDriverError(ApplyPilotError, ValueError):
     """浏览器底层驱动异常"""
 
 class AdapterError(ApplyPilotError):

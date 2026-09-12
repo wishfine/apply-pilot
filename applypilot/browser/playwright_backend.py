@@ -1,0 +1,396 @@
+import asyncio
+import logging
+import time
+from pathlib import Path
+from typing import Optional, Any, Callable
+from playwright.async_api import async_playwright
+
+from applypilot.core.config import get_browser_dir
+from applypilot.core.exceptions import BrowserDriverError
+from applypilot.browser.base import (
+    ElementRect,
+    InteractionPolicy,
+    BrowserElement,
+    BrowserPage,
+    BrowserBackend,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class ActionRateLimiter:
+    """底层动作间隔限流器，接管动作间隔，杜绝业务散落私有 jitter"""
+
+    def __init__(self, min_interval_ms: int = 150):
+        self.min_interval_ms = min_interval_ms
+        self._last_action_time: float = 0.0
+
+    async def throttle(self) -> None:
+        if self.min_interval_ms <= 0:
+            return
+        now = time.monotonic()
+        elapsed_ms = (now - self._last_action_time) * 1000.0
+        if elapsed_ms < self.min_interval_ms:
+            await asyncio.sleep((self.min_interval_ms - elapsed_ms) / 1000.0)
+        self._last_action_time = time.monotonic()
+
+
+class PlaywrightElement:
+    """BrowserElement 协议的 Playwright Locator 适配器包装"""
+
+    def __init__(
+        self,
+        locator: Any,
+        policy: Optional[InteractionPolicy] = None,
+        rate_limiter: Optional[ActionRateLimiter] = None,
+    ):
+        self._locator = locator
+        self._policy = policy or InteractionPolicy()
+        self._rate_limiter = rate_limiter or ActionRateLimiter(self._policy.min_action_interval_ms)
+
+    async def _throttle(self) -> None:
+        await self._rate_limiter.throttle()
+
+    async def get_attribute(self, name: str) -> Optional[str]:
+        try:
+            return await self._locator.get_attribute(name, timeout=self._policy.action_timeout_ms)
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"get_attribute('{name}') failed: {e}") from e
+
+    async def get_text(self) -> str:
+        try:
+            if hasattr(self._locator, "inner_text"):
+                val = await self._locator.inner_text(timeout=self._policy.action_timeout_ms)
+            elif hasattr(self._locator, "text_content"):
+                val = await self._locator.text_content(timeout=self._policy.action_timeout_ms)
+            else:
+                val = ""
+            return val if val is not None else ""
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"get_text failed: {e}") from e
+
+    async def click(self) -> None:
+        try:
+            await self._throttle()
+            await self._locator.click(timeout=self._policy.action_timeout_ms)
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"click failed: {e}") from e
+
+    async def type_text(self, text: str) -> None:
+        try:
+            await self._throttle()
+            if hasattr(self._locator, "fill"):
+                await self._locator.fill(text, timeout=self._policy.action_timeout_ms)
+            elif hasattr(self._locator, "press_sequentially"):
+                await self._locator.press_sequentially(text, timeout=self._policy.action_timeout_ms)
+            elif hasattr(self._locator, "type"):
+                await self._locator.type(text, timeout=self._policy.action_timeout_ms)
+            else:
+                raise BrowserDriverError("Locator does not support fill/type")
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"type_text failed: {e}") from e
+
+    async def clear_text(self) -> None:
+        try:
+            await self._throttle()
+            if hasattr(self._locator, "clear"):
+                await self._locator.clear(timeout=self._policy.action_timeout_ms)
+            elif hasattr(self._locator, "fill"):
+                await self._locator.fill("", timeout=self._policy.action_timeout_ms)
+            else:
+                raise BrowserDriverError("Locator does not support clear/fill")
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"clear_text failed: {e}") from e
+
+    async def select_option(self, value: str) -> None:
+        try:
+            await self._throttle()
+            await self._locator.select_option(value=value, timeout=self._policy.action_timeout_ms)
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"select_option('{value}') failed: {e}") from e
+
+    async def set_files(self, file_paths: list[str]) -> None:
+        try:
+            await self._throttle()
+            if hasattr(self._locator, "set_input_files"):
+                await self._locator.set_input_files(file_paths, timeout=self._policy.action_timeout_ms)
+            elif hasattr(self._locator, "set_files"):
+                await self._locator.set_files(file_paths)
+            else:
+                raise BrowserDriverError("Locator does not support set_input_files")
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"set_files failed: {e}") from e
+
+    async def get_bounding_rect(self) -> ElementRect:
+        try:
+            box = await self._locator.bounding_box(timeout=self._policy.action_timeout_ms)
+            if box is None:
+                raise BrowserDriverError("Element has no bounding box (it may be invisible or detached)")
+            if isinstance(box, ElementRect):
+                return box
+            return ElementRect(
+                x=float(box["x"]),
+                y=float(box["y"]),
+                width=float(box["width"]),
+                height=float(box["height"]),
+            )
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"get_bounding_rect failed: {e}") from e
+
+    async def scroll_into_view(self) -> None:
+        try:
+            await self._throttle()
+            if hasattr(self._locator, "scroll_into_view_if_needed"):
+                await self._locator.scroll_into_view_if_needed(timeout=self._policy.action_timeout_ms)
+            elif hasattr(self._locator, "scroll_into_view"):
+                await self._locator.scroll_into_view()
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"scroll_into_view failed: {e}") from e
+
+
+class PlaywrightPage:
+    """BrowserPage 协议的 Playwright Page 适配器包装"""
+
+    def __init__(
+        self,
+        page: Any,
+        policy: Optional[InteractionPolicy] = None,
+        rate_limiter: Optional[ActionRateLimiter] = None,
+    ):
+        self._page = page
+        self._policy = policy or InteractionPolicy()
+        self._rate_limiter = rate_limiter or ActionRateLimiter(self._policy.min_action_interval_ms)
+
+    async def url(self) -> str:
+        try:
+            u = self._page.url
+            if callable(u):
+                res = u()
+                if asyncio.iscoroutine(res):
+                    return await res
+                return str(res)
+            return str(u)
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"url failed: {e}") from e
+
+    async def title(self) -> str:
+        try:
+            t = self._page.title
+            if callable(t):
+                res = t()
+                if asyncio.iscoroutine(res):
+                    return await res
+                return str(res)
+            return str(t)
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"title failed: {e}") from e
+
+    async def _resolve_locator(self, selector: str) -> Any:
+        loc = self._page.locator(selector)
+        if asyncio.iscoroutine(loc):
+            loc = await loc
+        return loc
+
+    async def find(self, selector: str) -> Optional[BrowserElement]:
+        try:
+            loc = await self._resolve_locator(selector)
+            if hasattr(loc, "count"):
+                cnt = loc.count()
+                if asyncio.iscoroutine(cnt):
+                    cnt = await cnt
+                if cnt == 0:
+                    return None
+            first_loc = loc.first if hasattr(loc, "first") else loc
+            return PlaywrightElement(first_loc, policy=self._policy, rate_limiter=self._rate_limiter)
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"find('{selector}') failed: {e}") from e
+
+    async def find_all(self, selector: str) -> list[BrowserElement]:
+        try:
+            loc = await self._resolve_locator(selector)
+            if hasattr(loc, "all"):
+                locs = loc.all()
+                if asyncio.iscoroutine(locs):
+                    locs = await locs
+                return [
+                    PlaywrightElement(l, policy=self._policy, rate_limiter=self._rate_limiter)
+                    for l in locs
+                ]
+            elif hasattr(loc, "count"):
+                cnt = loc.count()
+                if asyncio.iscoroutine(cnt):
+                    cnt = await cnt
+                return [
+                    PlaywrightElement(loc.nth(i), policy=self._policy, rate_limiter=self._rate_limiter)
+                    for i in range(cnt)
+                ]
+            return []
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"find_all('{selector}') failed: {e}") from e
+
+    async def wait_for(self, selector: str, timeout_ms: int = 5000) -> BrowserElement:
+        try:
+            loc = await self._resolve_locator(selector)
+            first_loc = loc.first if hasattr(loc, "first") else loc
+            if hasattr(first_loc, "wait_for"):
+                res = first_loc.wait_for(timeout=timeout_ms)
+                if asyncio.iscoroutine(res):
+                    await res
+            elif hasattr(self._page, "wait_for_selector"):
+                res = self._page.wait_for_selector(selector, timeout=timeout_ms)
+                if asyncio.iscoroutine(res):
+                    await res
+            return PlaywrightElement(first_loc, policy=self._policy, rate_limiter=self._rate_limiter)
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"wait_for('{selector}') failed: {e}") from e
+
+    async def execute_unsafe_script(self, reason: str, script: str, arg: Any = None) -> Any:
+        if not reason or not reason.strip():
+            raise BrowserDriverError("execute_unsafe_script requires a non-empty reason for audit trail")
+        logger.warning(
+            "AUDIT [execute_unsafe_script]: reason='%s', script='%s'",
+            reason.strip(),
+            script[:120],
+        )
+        try:
+            if arg is not None:
+                return await self._page.evaluate(script, arg)
+            return await self._page.evaluate(script)
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"execute_unsafe_script failed: {e}") from e
+
+
+class PlaywrightBackend:
+    """BrowserBackend 协议的 Playwright 驱动实现"""
+
+    def __init__(
+        self,
+        headless: bool = False,
+        user_data_dir: Optional[Path] = None,
+        policy: Optional[InteractionPolicy] = None,
+        user_prompt_handler: Optional[Callable[[str], Any]] = None,
+    ):
+        self.headless = headless
+        self.user_data_dir = user_data_dir or get_browser_dir()
+        self.policy = policy or InteractionPolicy()
+        self.user_prompt_handler = user_prompt_handler
+        self._playwright: Optional[Any] = None
+        self._context: Optional[Any] = None
+        self._current_page: Optional[PlaywrightPage] = None
+        self._rate_limiter = ActionRateLimiter(min_interval_ms=self.policy.min_action_interval_ms)
+
+    async def _ensure_context(self) -> Any:
+        if self._context is None:
+            try:
+                Path(self.user_data_dir).mkdir(parents=True, exist_ok=True)
+                if self._playwright is None:
+                    self._playwright = await async_playwright().start()
+                self._context = await self._playwright.chromium.launch_persistent_context(
+                    user_data_dir=str(self.user_data_dir),
+                    headless=self.headless,
+                )
+            except BrowserDriverError:
+                raise
+            except Exception as e:
+                raise BrowserDriverError(f"Failed to launch browser context: {e}") from e
+        return self._context
+
+    async def open_page(self, url: str) -> BrowserPage:
+        try:
+            await self._ensure_context()
+            page = None
+            if self._context.pages:
+                candidate = self._context.pages[0]
+                try:
+                    cand_url = candidate.url
+                    if cand_url in ("about:blank", "") and len(self._context.pages) == 1:
+                        page = candidate
+                except Exception:
+                    pass
+            if page is None:
+                page = await self._context.new_page()
+
+            await page.goto(url, timeout=self.policy.action_timeout_ms)
+            self._current_page = PlaywrightPage(page, policy=self.policy, rate_limiter=self._rate_limiter)
+            return self._current_page
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"open_page('{url}') failed: {e}") from e
+
+    async def current_page(self) -> BrowserPage:
+        try:
+            await self._ensure_context()
+            if self._current_page is not None:
+                return self._current_page
+            if self._context.pages:
+                page = self._context.pages[-1]
+                self._current_page = PlaywrightPage(page, policy=self.policy, rate_limiter=self._rate_limiter)
+                return self._current_page
+            page = await self._context.new_page()
+            self._current_page = PlaywrightPage(page, policy=self.policy, rate_limiter=self._rate_limiter)
+            return self._current_page
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"current_page failed: {e}") from e
+
+    async def wait_for_user(self, reason: str) -> None:
+        logger.info("AUDIT: Human intervention requested: %s", reason)
+        if self.user_prompt_handler is not None:
+            res = self.user_prompt_handler(reason)
+            if asyncio.iscoroutine(res):
+                await res
+            return
+        print(f"\n[ApplyPilot] Human action required: {reason}")
+
+    async def close(self) -> None:
+        try:
+            if self._context is not None:
+                await self._context.close()
+                self._context = None
+            if self._playwright is not None:
+                await self._playwright.stop()
+                self._playwright = None
+            self._current_page = None
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"close failed: {e}") from e
+
+    async def __aenter__(self):
+        await self._ensure_context()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
