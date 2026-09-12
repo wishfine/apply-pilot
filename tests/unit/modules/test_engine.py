@@ -166,11 +166,16 @@ async def test_platform_detection_routing(tmp_path: Path):
             )
         ]
     )
+    mock_beisen = AsyncMock()
+    mock_beisen.detect_stage.return_value = "beisen_stage"
+    mock_beisen.is_final_review.return_value = True
+    mock_beisen.advance.return_value = False
 
     engine = ApplyEngine(
         db_path=db_file,
         browser_backend=mock_browser,
         platform_detector=mock_detector,
+        adapters={"beisen": mock_beisen},
     )
     profile = _create_sample_profile()
     target = _create_sample_target(provider=None)  # Provider None -> relies on detector
@@ -178,6 +183,8 @@ async def test_platform_detection_routing(tmp_path: Path):
     status = await engine.run_application_target(target, profile)
     assert status == ApplicationStatus.READY_REVIEW
     mock_detector.detect.assert_awaited_once_with(mock_page)
+    mock_beisen.detect_stage.assert_awaited_once()
+
 
 
 @pytest.mark.asyncio
@@ -306,4 +313,179 @@ async def test_beisen_multistage_advance_and_fill(tmp_path: Path):
     assert mock_adapter.detect_stage.await_count == 2
     mock_adapter.advance.assert_awaited_once()
     mock_adapter.fill_field.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_exception_handling_marks_run_failed(tmp_path: Path):
+    db_file = tmp_path / "test.db"
+    await init_db(db_file)
+    mock_browser, mock_page = _create_mock_browser_and_page()
+    mock_page.find_all.side_effect = RuntimeError("Browser crashed during scanning")
+
+    engine = ApplyEngine(db_path=db_file, browser_backend=mock_browser)
+    profile = _create_sample_profile()
+    target = _create_sample_target(provider="generic")
+
+    with pytest.raises(RuntimeError, match="Browser crashed during scanning"):
+        await engine.run_application_target(target, profile)
+
+    app_repo = ApplicationRepository(db_file)
+    runs = await app_repo.list_runs_by_application(f"app_{target.job.job_id}")
+    assert len(runs) == 1
+    assert runs[0]["status"] == "failed"
+    assert "Browser crashed during scanning" in (runs[0]["end_reason"] or "")
+
+    event_repo = EventRepository(db_file)
+    events = await event_repo.list_events_by_run(runs[0]["id"])
+    event_types = [e["event_type"] for e in events]
+    assert "RUN_FAILED" in event_types
+
+
+@pytest.mark.asyncio
+async def test_loop_exhaustion_triggers_max_stages_exceeded(tmp_path: Path):
+    db_file = tmp_path / "test.db"
+    await init_db(db_file)
+    mock_browser, mock_page = _create_mock_browser_and_page()
+    mock_page.find_all = AsyncMock(return_value=[])
+
+    infinite_adapter = AsyncMock()
+    infinite_adapter.detect_stage.return_value = "endless_stage"
+    infinite_adapter.is_final_review.return_value = False
+    infinite_adapter.advance.return_value = True
+
+    engine = ApplyEngine(
+        db_path=db_file,
+        browser_backend=mock_browser,
+        adapters={"infinite": infinite_adapter},
+    )
+    profile = _create_sample_profile()
+    target = _create_sample_target(provider="infinite")
+
+    with pytest.raises(RuntimeError, match="Exceeded maximum stage transitions"):
+        await engine.run_application_target(target, profile)
+
+    app_repo = ApplicationRepository(db_file)
+    runs = await app_repo.list_runs_by_application(f"app_{target.job.job_id}")
+    assert len(runs) == 1
+    assert runs[0]["status"] == "failed"
+    assert runs[0]["end_reason"] == "MAX_STAGES_EXCEEDED"
+
+    event_repo = EventRepository(db_file)
+    events = await event_repo.list_events_by_run(runs[0]["id"])
+    assert any(e["event_type"] == "RUN_FAILED" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_field_mappings_table_populated(tmp_path: Path):
+    db_file = tmp_path / "test.db"
+    await init_db(db_file)
+    mock_browser, mock_page = _create_mock_browser_and_page()
+
+    mock_el = AsyncMock()
+    mock_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {
+            "name": "姓名",
+            "type": "text",
+            "id": "name_field",
+        }.get(attr)
+    )
+    mock_el.get_text = AsyncMock(return_value="")
+    mock_page.find_all = AsyncMock(return_value=[mock_el])
+
+    engine = ApplyEngine(db_path=db_file, browser_backend=mock_browser)
+    profile = _create_sample_profile()
+    target = _create_sample_target(provider="generic")
+
+    await engine.run_application_target(target, profile)
+
+    import aiosqlite
+
+    async with aiosqlite.connect(db_file) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM field_mappings") as cursor:
+            rows = await cursor.fetchall()
+            assert len(rows) == 1
+            assert rows[0]["profile_path"] == "identity.name"
+            assert rows[0]["method"] == "exact_rule"
+            assert rows[0]["disclosure_allowed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_inferred_value_kind_avoids_redundant_fill(tmp_path: Path):
+    db_file = tmp_path / "test.db"
+    await init_db(db_file)
+    mock_browser, mock_page = _create_mock_browser_and_page()
+
+    # Form field already has "北京市", profile has "北京"
+    mock_el = AsyncMock()
+    mock_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {
+            "name": "现居城市",
+            "type": "text",
+            "id": "city_field",
+            "value": "北京市",
+        }.get(attr)
+    )
+    mock_el.get_text = AsyncMock(return_value="北京市")
+    mock_page.find_all = AsyncMock(return_value=[mock_el])
+
+    engine = ApplyEngine(db_path=db_file, browser_backend=mock_browser)
+    profile = _create_sample_profile()
+    target = _create_sample_target(provider="generic")
+
+    await engine.run_application_target(target, profile)
+
+    # Because ValueKind.CITY treats "北京市" == "北京", clear/type should not be called
+    mock_el.type_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_correction_memory_wiring(tmp_path: Path):
+    db_file = tmp_path / "test.db"
+    await init_db(db_file)
+    mock_browser, mock_page = _create_mock_browser_and_page()
+
+    # Pre-seed correction memory for custom label
+    from applypilot.storage.repositories import CorrectionRepository
+
+    corr_repo = CorrectionRepository(db_file)
+    await corr_repo.save_correction(
+        correction_id="corr_01",
+        provider="generic",
+        normalized_label="自定义姓名标签",
+        field_type="text",
+        corrected_semantic_path="identity.name",
+        confidence=0.99,
+    )
+
+    mock_el = AsyncMock()
+    mock_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {
+            "name": "自定义姓名标签",
+            "type": "text",
+            "id": "custom_name_field",
+        }.get(attr)
+    )
+    mock_el.get_text = AsyncMock(return_value="")
+    mock_page.find_all = AsyncMock(return_value=[mock_el])
+
+    engine = ApplyEngine(db_path=db_file, browser_backend=mock_browser)
+    profile = _create_sample_profile()
+    target = _create_sample_target(provider="generic")
+
+    await engine.run_application_target(target, profile)
+
+    # Element typed with "张三" via memory
+    mock_el.type_text.assert_awaited_once_with("张三")
+
+    import aiosqlite
+
+    async with aiosqlite.connect(db_file) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM field_mappings") as cursor:
+            rows = await cursor.fetchall()
+            assert len(rows) == 1
+            assert rows[0]["method"] == "memory"
+            assert rows[0]["confidence"] == 0.99
+
 

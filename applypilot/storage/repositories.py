@@ -375,13 +375,16 @@ class SnapshotRepository:
         self,
         mapping_id: str,
         snapshot_id: str,
-        field_signature: str,
-        method: str,
-        confidence: float,
-        disclosure_allowed: bool,
+        field_signature: Optional[str] = None,
+        method: str = "exact_rule",
+        confidence: float = 1.0,
+        disclosure_allowed: bool = True,
         profile_path: Optional[str] = None,
         created_at: Optional[str] = None,
+        field_sig: Optional[str] = None,
+        **kwargs: Any,
     ) -> None:
+        sig = field_signature or field_sig or ""
         now = created_at or _utc_now_iso()
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys = ON;")
@@ -396,7 +399,7 @@ class SnapshotRepository:
                 (
                     mapping_id,
                     snapshot_id,
-                    field_signature,
+                    sig,
                     profile_path,
                     method,
                     confidence,
@@ -405,6 +408,7 @@ class SnapshotRepository:
                 ),
             )
             await db.commit()
+
 
     async def get_field_mappings(self, snapshot_id: str) -> List[Dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
@@ -526,13 +530,20 @@ class CorrectionRepository:
 
     async def lookup_corrections(
         self,
-        provider: str,
-        normalized_label: str,
+        provider: Optional[str] = None,
+        normalized_label: Optional[str] = None,
         section_signature: Optional[str] = None,
         tenant_hint: Optional[str] = None,
+        platform: Optional[str] = None,
+        **kwargs: Any,
     ) -> List[Dict[str, Any]]:
-        conditions = ["provider = ?", "normalized_label = ?", "enabled = 1"]
-        params: List[Any] = [provider, normalized_label]
+        prov = provider or platform or "generic"
+        conditions = ["provider = ?", "enabled = 1"]
+        params: List[Any] = [prov]
+
+        if normalized_label is not None:
+            conditions.append("normalized_label = ?")
+            params.append(normalized_label)
 
         if section_signature is not None:
             conditions.append("(section_signature = ? OR section_signature IS NULL)")
@@ -562,6 +573,7 @@ class CorrectionRepository:
             async with db.execute(query, tuple(params)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
+
 
     async def increment_hit_count(self, memory_id: str) -> None:
         now = _utc_now_iso()
