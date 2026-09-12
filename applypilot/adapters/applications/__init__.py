@@ -1,20 +1,22 @@
-from applypilot.adapters.applications import (
+"""Application adapter module implementing strategy-composed adapters and component fillers."""
+
+from applypilot.adapters.applications.base import (
     ApplicationAdapter,
     BaseApplicationAdapter,
-    BeisenApplicationAdapter,
-    BeisenModalSchoolPicker,
     ComponentFiller,
     FillResult,
+)
+from applypilot.adapters.applications.beisen import (
+    BeisenApplicationAdapter,
+    BeisenModalSchoolPicker,
+)
+from applypilot.adapters.applications.generic import (
     GenericApplicationAdapter,
-    MokaApplicationAdapter,
-    MokaSearchSelectFiller,
     StandardInputFiller,
 )
-from applypilot.adapters.detection import (
-    DetectionEvidence,
-    DetectionResult,
-    DetectionReport,
-    PlatformDetector,
+from applypilot.adapters.applications.moka import (
+    MokaApplicationAdapter,
+    MokaSearchSelectFiller,
 )
 
 __all__ = [
@@ -23,14 +25,9 @@ __all__ = [
     "BeisenApplicationAdapter",
     "BeisenModalSchoolPicker",
     "ComponentFiller",
-    "DetectionEvidence",
-    "DetectionResult",
-    "DetectionReport",
     "FillResult",
     "GenericApplicationAdapter",
     "MokaApplicationAdapter",
     "MokaSearchSelectFiller",
-    "PlatformDetector",
     "StandardInputFiller",
 ]
-
