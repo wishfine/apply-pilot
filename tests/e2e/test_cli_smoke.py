@@ -27,6 +27,7 @@ def test_profile_subcommands_help():
     assert res.exit_code == 0
     assert "validate" in res.stdout
     assert "show" in res.stdout
+    assert "import" in res.stdout
 
 
 def test_apply_subcommands_help():

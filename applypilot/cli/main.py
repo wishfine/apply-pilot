@@ -20,6 +20,10 @@ import yaml
 
 from applypilot.core.config import get_app_home_dir, get_db_path
 from applypilot.domain.profile import CandidateProfile
+from applypilot.modules.profile.ingestion import (
+    ResumeIngestionError,
+    ResumeIngestionService,
+)
 from applypilot.storage.repositories import ApplicationRepository, EventRepository
 
 app = typer.Typer(
@@ -124,6 +128,53 @@ def profile_show(
         console.print(f"City: {profile.contact.current_city or 'N/A'}")
     except Exception as e:
         console.print(f"[bold red]Failed to load profile: {e}[/bold red]")
+        raise typer.Exit(code=1)
+
+
+@profile_app.command("import")
+def profile_import(
+    file: Path = typer.Option(..., "--file", "-f", help="Path to resume file (.pdf or .tex)"),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Path to output profile.yaml (defaults to ~/.applypilot/profile.yaml)"
+    ),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model name"),
+    base_url: Optional[str] = typer.Option(None, "--base-url", "-b", help="LLM API base URL"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", help="LLM API key"),
+) -> None:
+    """Import and structure a resume file into CandidateProfile YAML."""
+    if not file.exists() or not file.is_file():
+        console.print(f"[bold red]File not found: {file}[/bold red]")
+        raise typer.Exit(code=1)
+
+    output_path = output or (get_app_home_dir() / "profile.yaml")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    console.print(f"[bold blue]Importing resume from: {file}[/bold blue]")
+    service = ResumeIngestionService(api_key=api_key, base_url=base_url, model=model)
+
+    try:
+        profile = asyncio.run(service.parse_file(file))
+        yaml_str = yaml.safe_dump(
+            profile.model_dump(mode="json", exclude_none=True),
+            allow_unicode=True,
+            sort_keys=False,
+        )
+        output_path.write_text(yaml_str, encoding="utf-8")
+
+        console.print(f"[bold green]Profile successfully imported to: {output_path}[/bold green]")
+        console.print(
+            f"Candidate: [bold]{profile.identity.name or 'N/A'}[/bold] ({profile.profile_id})"
+        )
+        if profile.contact.email:
+            console.print(f"Email: {profile.contact.email}")
+        if profile.contact.mobile:
+            console.print(f"Mobile: {profile.contact.mobile}")
+        console.print(f"Education records: {len(profile.education)}")
+        console.print(f"Experience records: {len(profile.experiences)}")
+        console.print(f"Project records: {len(profile.projects)}")
+        console.print(f"Skill records: {len(profile.skills)}")
+    except Exception as e:
+        console.print(f"[bold red]Import failed: {e}[/bold red]")
         raise typer.Exit(code=1)
 
 
