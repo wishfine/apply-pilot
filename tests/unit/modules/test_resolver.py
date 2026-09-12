@@ -364,3 +364,39 @@ def test_safety_and_edge_cases(sample_profile: CandidateProfile):
     # Invalid input types
     assert ValueResolver.resolve(sample_profile, None, None) is None  # type: ignore
     assert ValueResolver.resolve(None, None, "identity.name") is None  # type: ignore
+
+
+def test_profile_root_prefix(sample_profile: CandidateProfile):
+    assert ValueResolver.resolve(sample_profile, None, "profile.identity.name") == "张三"
+    assert ValueResolver.resolve(sample_profile, None, "profile.contact.mobile") == "13800138000"
+    assert ValueResolver.resolve(sample_profile, None, "profile.education[__HIGHEST__].school_name") == "北京大学"
+
+
+def test_dict_and_month_tie_breaking():
+    # Tie breaking with month
+    records = [
+        {
+            "school_name": "春季毕业大学",
+            "education_level": "master",
+            "start_date": {"year": 2022, "month": 9},
+            "end_date": {"year": 2024, "month": 3},
+        },
+        {
+            "school_name": "秋季毕业大学",
+            "education_level": "master",
+            "start_date": {"year": 2022, "month": 9},
+            "end_date": {"year": 2024, "month": 11},
+        },
+    ]
+    resolved = ValueResolver._resolve_highest_education(records)
+    assert resolved["school_name"] == "秋季毕业大学"
+
+    # Dict alias resolution
+    curr = {"project_name": "MyProject"}
+    val = ValueResolver.resolve(
+        CandidateProfile(profile_id="p", identity=IdentityInfo(name="Test")),
+        None,
+        "identity.name",
+    )
+    assert val == "Test"
+

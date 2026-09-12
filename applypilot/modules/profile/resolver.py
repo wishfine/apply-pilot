@@ -37,6 +37,14 @@ ID_ATTRS: tuple[str, ...] = (
 )
 
 
+def _get_val(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 class ValueResolver:
     """Evaluates dot-separated and indexed paths over a candidate profile and resume variant."""
 
@@ -62,11 +70,16 @@ class ValueResolver:
             if tokens is None or not tokens:
                 return None
 
-            # Handle variant root
+            # Handle variant or profile root prefix
             if tokens[0] == ("attr", "variant"):
                 if variant is None:
                     return None
                 curr: Any = variant
+                remaining_tokens = tokens[1:]
+            elif tokens[0] == ("attr", "profile"):
+                if profile is None:
+                    return None
+                curr = profile
                 remaining_tokens = tokens[1:]
             else:
                 if profile is None:
@@ -95,6 +108,8 @@ class ValueResolver:
                     if isinstance(curr, dict):
                         if val in curr:
                             curr = curr[val]
+                        elif val in FIELD_ALIASES and FIELD_ALIASES[val] in curr:
+                            curr = curr[FIELD_ALIASES[val]]
                         else:
                             return None
                     elif hasattr(curr, val):
@@ -137,16 +152,10 @@ class ValueResolver:
                                 for item in curr:
                                     matched_id = None
                                     for id_attr in ID_ATTRS:
-                                        if hasattr(item, id_attr):
-                                            matched_id = getattr(item, id_attr)
-                                            if matched_id:
-                                                break
-                                    if matched_id is None and isinstance(item, dict):
-                                        for id_attr in ID_ATTRS:
-                                            if id_attr in item:
-                                                matched_id = item[id_attr]
-                                                if matched_id:
-                                                    break
+                                        id_val = _get_val(item, id_attr)
+                                        if id_val is not None:
+                                            matched_id = id_val
+                                            break
                                     if matched_id == val:
                                         matched = item
                                         break
@@ -210,24 +219,26 @@ class ValueResolver:
         return tokens
 
     @classmethod
-    def _resolve_highest_education(cls, records: list[Any]) -> Optional[EducationRecord]:
+    def _resolve_highest_education(cls, records: list[Any]) -> Optional[Any]:
         if not records:
             return None
 
-        def _edu_sort_key(item_with_idx: tuple[int, Any]) -> tuple[int, int, int, int]:
+        def _edu_sort_key(item_with_idx: tuple[int, Any]) -> tuple[int, int, int, int, int, int]:
             idx, edu = item_with_idx
-            level = getattr(edu, "education_level", None)
+            level = _get_val(edu, "education_level")
             level_weight = EDUCATION_LEVEL_WEIGHTS.get(level, 0)
-            end_date = getattr(edu, "end_date", None)
-            end_year = getattr(end_date, "year", 0) if end_date else 0
-            start_date = getattr(edu, "start_date", None)
-            start_year = getattr(start_date, "year", 0) if start_date else 0
-            return (level_weight, end_year, start_year, idx)
+            end_date = _get_val(edu, "end_date")
+            end_year = _get_val(end_date, "year", 0) if end_date else 0
+            end_month = _get_val(end_date, "month", 0) or 0 if end_date else 0
+            start_date = _get_val(edu, "start_date")
+            start_year = _get_val(start_date, "year", 0) if start_date else 0
+            start_month = _get_val(start_date, "month", 0) or 0 if start_date else 0
+            return (level_weight, end_year, end_month, start_year, start_month, idx)
 
         yes_records = [
             (idx, r)
             for idx, r in enumerate(records)
-            if getattr(r, "is_highest_degree", None) in (TriState.YES, "yes")
+            if _get_val(r, "is_highest_degree") in (TriState.YES, "yes")
         ]
         if yes_records:
             return max(yes_records, key=_edu_sort_key)[1]
