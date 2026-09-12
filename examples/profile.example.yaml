@@ -1,0 +1,160 @@
+# ==============================================================================
+# ApplyPilot 候选人事实档案模板 (CandidateProfile Ground Truth)
+# 
+# 核心原则：CandidateProfile = Truth（事实库是唯一真理）
+# - 请如实填写你的各项经历与客观信息，系统严禁无中生有与虚构编造。
+# - 未填写的选填字段系统将保持留白，杜绝自动化过程中的假定默认值。
+# ==============================================================================
+
+schema_version: "1.1.0"
+profile_id: "cand_zhangsan_2026"
+
+# 1. 基础身份信息 (Identity)
+identity:
+  name: "张三"
+  gender: "男"                         # 男 / 女
+  pinyin_first_name: "San"
+  pinyin_last_name: "Zhang"
+  english_name: "San Zhang"
+  birth_date: "2001-05-15"             # 支持 YYYY-MM-DD 或 YYYY-MM
+  id_type: "身份证"                     # 身份证 / 护照 / 港澳台通行证
+  id_number: "110101200105152345"      # 仅保存在本地，默认不上传大模型
+  ethnicity: "汉族"                    # 少数民族请准确填写全称，如：维吾尔族、满族
+  health_status: "良好"                 # 健康 / 良好
+
+# 2. 联系方式与常住地 (Contact)
+contact:
+  mobile: "13800138000"
+  email: "zhangsan@example.com"
+  current_city: "北京市"                # 常住城市（系统会自动避免误填为“期望工作城市”）
+  emergency_contact_name: "张父"
+  emergency_contact_phone: "13900139000"
+
+# 3. 教育背景 (Education)
+# 支持多段教育经历（本科、硕士、博士等）。
+# 系统会自动根据最高学历（is_highest_degree）与学历层次层级进行智能优先级调度。
+education:
+  - id: "edu_master"
+    school_name: "清华大学"
+    education_level: "master"           # bachelor / master / doctor / associate / high_school
+    academic_degree: "工学硕士"          # 学位名称
+    major: "计算机科学与技术"
+    department: "计算机科学与技术系"
+    start_date: "2023-09"
+    end_date: "2026-06"
+    gpa: 3.85
+    gpa_scale: 4.0
+    ranking_pct: "前 10%"
+    is_first_degree: "no"               # 是否第一学历: yes / no / unknown
+    is_highest_degree: "yes"            # 是否最高学历: yes / no / unknown
+    thesis_title: "大规模分布式计算系统下的智能投递调度算法研究"
+
+  - id: "edu_bachelor"
+    school_name: "北京航空航天大学"
+    education_level: "bachelor"
+    academic_degree: "工学学士"
+    major: "软件工程"
+    department: "软件学院"
+    start_date: "2019-09"
+    end_date: "2023-06"
+    gpa: 3.8
+    gpa_scale: 4.0
+    ranking_pct: "前 15%"
+    is_first_degree: "yes"
+    is_highest_degree: "no"
+    thesis_title: "基于图神经网络的知识图谱实体对齐技术"
+
+# 4. 实习与工作经历 (Experiences)
+experiences:
+  - id: "exp_bytedance_intern"
+    experience_type: "internship"       # internship / full_time / research / student_org / volunteer
+    org_name: "北京字节跳动科技有限公司"
+    department: "基础架构研发部"
+    title: "分布式存储后端开发实习生"
+    city: "北京市"
+    start_date: "2024-03"
+    end_date: "2024-09"
+    description_bullets:
+      - "主导分布式文件系统元数据服务热点缓存重构，在集群千万级高并发请求下将读延迟降低 32%。"
+      - "参与分布式一致性协议 Raft 模块优化，提升异常节点宕机恢复吞吐 25%。"
+    skills_used_ids: ["skill_go", "skill_distributed_systems"]
+
+  - id: "exp_tencent_intern"
+    experience_type: "internship"
+    org_name: "腾讯科技（北京）有限公司"
+    department: "微信技术架构部"
+    title: "后端开发实习生"
+    city: "北京市"
+    start_date: "2023-06"
+    end_date: "2023-09"
+    description_bullets:
+      - "负责内部微服务 RPC 框架监控中间件的指标聚合设计，日均处理日志数据量逾 500GB。"
+    skills_used_ids: ["skill_cpp", "skill_linux"]
+
+# 5. 项目经历 (Projects)
+projects:
+  - id: "proj_apply_pilot"
+    project_name: "ApplyPilot 自动化网申 Agent"
+    role: "核心开发者"
+    start_date: "2026-01"
+    end_date: "2026-06"
+    summary: "面向中国校招/社招的多平台受控智能网申自动化系统"
+    description_bullets:
+      - "基于 Playwright 打造浏览器受控抽象层，支持会话持久化与离线多信号平台嗅探。"
+      - "设计三级决策映射引擎与基于 SQLite WAL 模式的不可篡改审计账本。"
+    technologies_used_ids: ["skill_python", "skill_playwright"]
+    repo_url: "https://github.com/wishfine/apply-pilot"
+
+# 6. 专业技能 (Skills)
+skills:
+  - skill_id: "skill_python"
+    name: "Python"
+    category: "programming"
+    proficiency: "精通"
+    years_experience: 5.0
+
+  - skill_id: "skill_go"
+    name: "Go"
+    category: "programming"
+    proficiency: "熟练"
+    years_experience: 3.0
+
+  - skill_id: "skill_distributed_systems"
+    name: "分布式系统架构"
+    category: "engineering"
+    proficiency: "熟练"
+    years_experience: 2.0
+
+# 7. 中国校招专属事实 (Campus Context)
+campus_context:
+  graduation_year: 2026
+  graduation_month: 6
+  employment_status: "应届毕业生"
+  cet4_score: 580
+  cet6_score: 550
+  has_dispatch_qualification: "yes"     # 派遣证/报到证资格: yes / no / unknown
+
+# 8. 国央企/体制内特色背景扩展 (SOE Extended Info)
+# 国央企、事业单位、金融银行网申特有调查问卷
+soe_extended:
+  political_status: "中共党员"           # 群众 / 共青团员 / 中共预备党员 / 中共党员
+  join_party_date: "2022-11"
+  native_place: "湖北省武汉市"           # 籍贯
+  household_registration: "湖北省武汉市武昌区"
+  household_type: "城镇居民"
+  conflict_of_interest: "no"            # 是否有近亲属在应聘单位工作: yes / no / unknown
+  family_members:
+    - id: "fam_father"
+      relation: "父亲"
+      name: "张父"
+      political_status: "中共党员"
+      workplace: "武汉某某制造集团"
+      title: "高级工程师"
+      phone: "13900139000"
+    - id: "fam_mother"
+      relation: "母亲"
+      name: "李母"
+      political_status: "群众"
+      workplace: "武汉某某中学"
+      title: "教师"
+      phone: "13700137000"
