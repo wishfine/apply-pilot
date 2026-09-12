@@ -1,6 +1,8 @@
 """Multi-signal platform detection and candidate ranking."""
 
+import asyncio
 from typing import Optional
+from urllib.parse import urlsplit
 from pydantic import BaseModel, Field, field_validator
 
 from applypilot.browser.base import BrowserPage
@@ -57,8 +59,11 @@ class PlatformDetector:
         """
         try:
             raw_url = await page.url()
-            current_url = (raw_url or "").strip().lower()
+            parsed = urlsplit((raw_url or "").strip())
+            host = (parsed.hostname or "").lower()
+            current_url = raw_url or ""
         except Exception:
+            host = ""
             current_url = ""
 
         candidates: list[DetectionResult] = []
@@ -70,20 +75,40 @@ class PlatformDetector:
             except Exception:
                 return False
 
+        # Execute DOM & runtime script evaluations concurrently to minimize IPC RTT
+        (has_bs_script, has_bs_dom, has_moka_dom, has_moka_script) = await asyncio.gather(
+            _safe_eval("detect beisen runtime", "Boolean(window.BS || window.italent)"),
+            _safe_eval(
+                "detect beisen dom",
+                'Boolean(document.querySelector(\'[class*="italent-"], [class*="beisen-"], [id*="italent-"]\'))',
+            ),
+            _safe_eval(
+                "detect moka dom",
+                'Boolean(document.querySelector(\'[class*="moka-"], [class*="moka_"], [id*="moka-"], .moka-form\'))',
+            ),
+            _safe_eval(
+                "detect moka runtime",
+                "Boolean(window.moka || window.__MOKA__)",
+            ),
+        )
+
         # 1. Beisen Detection
         beisen_evidences: list[DetectionEvidence] = []
-        # Host signal (0.6)
-        if "italent.cn" in current_url or "beisen.com" in current_url:
+        is_beisen_host = (
+            host in ("italent.cn", "beisen.com")
+            or host.endswith(".italent.cn")
+            or host.endswith(".beisen.com")
+        )
+        if is_beisen_host:
             beisen_evidences.append(
                 DetectionEvidence(
                     signal_type="host",
-                    detail=f"Matched Beisen host pattern in URL ({current_url})",
+                    detail=f"Matched Beisen host pattern ({host})",
                     weight=0.6,
                 )
             )
 
-        # Script signal (0.4)
-        if await _safe_eval("detect beisen runtime", "Boolean(window.BS || window.italent)"):
+        if has_bs_script:
             beisen_evidences.append(
                 DetectionEvidence(
                     signal_type="script",
@@ -92,15 +117,11 @@ class PlatformDetector:
                 )
             )
 
-        # DOM signal (0.3)
-        if await _safe_eval(
-            "detect beisen dom",
-            'Boolean(document.querySelector(\'[class*="italent"], [class*="beisen"], [id*="italent"], meta[content*="italent"]\'))',
-        ):
+        if has_bs_dom:
             beisen_evidences.append(
                 DetectionEvidence(
                     signal_type="dom",
-                    detail="Detected Beisen DOM / meta signatures",
+                    detail="Detected Beisen DOM signatures",
                     weight=0.3,
                 )
             )
@@ -117,21 +138,17 @@ class PlatformDetector:
 
         # 2. Moka Detection
         moka_evidences: list[DetectionEvidence] = []
-        # Host signal (0.6)
-        if "mokahr.com" in current_url or "moka.com" in current_url:
+        is_moka_host = host == "mokahr.com" or host.endswith(".mokahr.com")
+        if is_moka_host:
             moka_evidences.append(
                 DetectionEvidence(
                     signal_type="host",
-                    detail=f"Matched Moka host pattern in URL ({current_url})",
+                    detail=f"Matched Moka host pattern ({host})",
                     weight=0.6,
                 )
             )
 
-        # DOM signal (0.4)
-        if await _safe_eval(
-            "detect moka dom",
-            'Boolean(document.querySelector(\'[class*="moka-"], [class*="moka_"], [id*="moka-"], .moka-form\'))',
-        ):
+        if has_moka_dom:
             moka_evidences.append(
                 DetectionEvidence(
                     signal_type="dom",
@@ -140,15 +157,11 @@ class PlatformDetector:
                 )
             )
 
-        # Script signal (0.3)
-        if await _safe_eval(
-            "detect moka runtime",
-            "Boolean(window.moka || window.__MOKA__ || window.__INITIAL_STATE__)",
-        ):
+        if has_moka_script:
             moka_evidences.append(
                 DetectionEvidence(
                     signal_type="script",
-                    detail="Detected Moka runtime objects (window.moka, __MOKA__, or __INITIAL_STATE__)",
+                    detail="Detected Moka runtime objects (window.moka or window.__MOKA__)",
                     weight=0.3,
                 )
             )

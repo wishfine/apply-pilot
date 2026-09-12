@@ -289,3 +289,22 @@ async def test_resilience_when_url_retrieval_fails():
     # Script detected Beisen even though URL failed
     assert top.platform == "beisen"
     assert top.confidence >= 0.4
+
+
+@pytest.mark.asyncio
+async def test_prevent_false_positives_in_query_params():
+    # A search engine query or blog URL referring to italent.cn or mokahr.com must NOT match host
+    page = MockPage(
+        current_url="https://www.google.com/search?q=italent.cn+review",
+    )
+    report = await PlatformDetector.detect(page)
+    top = report.best_candidate
+    assert top is not None
+    assert top.platform == "generic"
+
+    moka_blog = MockPage(
+        current_url="https://blog.techcareer.com/article/123?ref=mokahr.com",
+    )
+    report_blog = await PlatformDetector.detect(moka_blog)
+    assert report_blog.best_candidate.platform == "generic"
+
