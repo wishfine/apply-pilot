@@ -5,9 +5,16 @@ from applypilot.modules.profile.ingestion.extractors import (
     TexExtractor,
     TextExtractor,
 )
+from applypilot.modules.profile.ingestion.service import (
+    ResumeIngestionError,
+    ResumeIngestionService,
+)
 
 __all__ = [
     "TextExtractor",
     "PdfExtractor",
     "TexExtractor",
+    "ResumeIngestionService",
+    "ResumeIngestionError",
 ]
+
