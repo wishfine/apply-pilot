@@ -32,7 +32,43 @@ def test_fact_metadata_creation():
         source="user_input",
         verified=True,
         confidence=1.0,
-        updated_at="2026-09-12T00:00:00Z"
+        updated_at="2026-09-12T00:00:00Z",
     )
     assert meta.verified is True
     assert meta.source == "user_input"
+
+
+def test_partial_date_str():
+    assert str(PartialDate(year=2025, month=9, day=12)) == "2025-09-12"
+    assert str(PartialDate(year=2025, month=9)) == "2025-09"
+    assert str(PartialDate(year=2025)) == "2025"
+
+
+def test_partial_date_validation_rules():
+    with pytest.raises(ValueError, match="Cannot specify day without specifying month"):
+        PartialDate(year=2025, day=15)
+
+    with pytest.raises(ValueError, match="Month must be between 1 and 12"):
+        PartialDate(year=2025, month=13)
+
+    with pytest.raises(ValueError, match="Day must be between 1 and 31"):
+        PartialDate(year=2025, month=5, day=32)
+
+
+def test_field_policy_defaults():
+    policy = FieldPolicy(
+        path_pattern="profile.name",
+        sensitivity=SensitivityLevel.PERSONAL,
+        llm_allowed=True,
+    )
+    assert policy.log_strategy == LogStrategy.MASK
+    assert policy.requires_confirmation is False
+
+
+def test_fact_metadata_defaults_and_bounds():
+    meta = FactMetadata(source="user_input", updated_at="2026-09-12T00:00:00Z")
+    assert meta.verified is False
+    assert meta.confidence == 1.0
+
+    with pytest.raises(ValueError):
+        FactMetadata(source="user", updated_at="now", confidence=1.5)
