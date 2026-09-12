@@ -15,7 +15,11 @@ dependencies = [
     "playwright>=1.43.0",
 ]
 
+[project.scripts]
+applypilot = "applypilot.cli.main:app"
+
 [build-system]
+
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 

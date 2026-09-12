@@ -1,5 +1,6 @@
+import datetime
 from enum import StrEnum
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -17,6 +18,22 @@ class PartialDate(BaseModel):
     year: int
     month: Optional[int] = None
     day: Optional[int] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_from_string_or_date(cls, data: Any) -> Any:
+        if isinstance(data, (datetime.date, datetime.datetime)):
+            return {"year": data.year, "month": data.month, "day": data.day}
+        if isinstance(data, str):
+            data = data.strip()
+            parts = [int(p) for p in data.split("-") if p.isdigit()]
+            if len(parts) == 1:
+                return {"year": parts[0]}
+            elif len(parts) == 2:
+                return {"year": parts[0], "month": parts[1]}
+            elif len(parts) >= 3:
+                return {"year": parts[0], "month": parts[1], "day": parts[2]}
+        return data
 
     @model_validator(mode="after")
     def validate_date_components(self) -> "PartialDate":

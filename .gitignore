@@ -40,3 +40,4 @@ htmlcov/
 *.swp
 *.swo
 .DS_Store
+.superpowers/
