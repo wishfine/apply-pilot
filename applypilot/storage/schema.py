@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS application_runs (
 CREATE TABLE IF NOT EXISTS application_checkpoints (
     id VARCHAR(64) PRIMARY KEY,
     application_id VARCHAR(64) NOT NULL REFERENCES applications(id),
-    run_id VARCHAR(64) NOT NULL,
+    run_id VARCHAR(64) NOT NULL REFERENCES application_runs(id),
     page_url TEXT NOT NULL,
     stage_key VARCHAR(64),
     snapshot_id VARCHAR(64),
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS application_checkpoints (
 -- 6. 审计事件流水 (Append-only)
 CREATE TABLE IF NOT EXISTS application_events (
     id VARCHAR(64) PRIMARY KEY,
-    run_id VARCHAR(64) NOT NULL,
+    run_id VARCHAR(64) NOT NULL REFERENCES application_runs(id),
     event_type VARCHAR(64) NOT NULL,
     payload_json TEXT NOT NULL, -- 经 AuditSanitizer 脱敏
     created_at DATETIME NOT NULL
@@ -84,7 +84,7 @@ CREATE INDEX IF NOT EXISTS idx_events_run_time ON application_events(run_id, cre
 -- 7. 表单快照表
 CREATE TABLE IF NOT EXISTS form_snapshots (
     id VARCHAR(64) PRIMARY KEY,
-    run_id VARCHAR(64) NOT NULL,
+    run_id VARCHAR(64) NOT NULL REFERENCES application_runs(id),
     page_url TEXT NOT NULL,
     stage_key VARCHAR(64),
     dom_fingerprint VARCHAR(64) NOT NULL,
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS field_mappings (
 -- 9. 页面操作执行与回读审计 (Action 审计)
 CREATE TABLE IF NOT EXISTS field_actions (
     id VARCHAR(64) PRIMARY KEY,
-    run_id VARCHAR(64) NOT NULL,
+    run_id VARCHAR(64) NOT NULL REFERENCES application_runs(id),
     snapshot_id VARCHAR(64) NOT NULL REFERENCES form_snapshots(id),
     field_signature VARCHAR(64) NOT NULL,
     mapping_id VARCHAR(64) REFERENCES field_mappings(id),

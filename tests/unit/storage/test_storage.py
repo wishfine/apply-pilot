@@ -14,12 +14,51 @@ from applypilot.storage.repositories import (
 )
 
 
+async def _create_test_run(
+    db_file: Path,
+    app_id: str = "app_test_01",
+    run_id: str = "run_01",
+    profile_id: str = "cand_1",
+    rev_id: str = "rev_01",
+) -> None:
+    """Helper to create a valid hierarchy: profile revision -> application -> run."""
+    rev_repo = RevisionRepository(db_file)
+    app_repo = ApplicationRepository(db_file)
+
+    await rev_repo.save_profile_revision(
+        revision_id=rev_id,
+        profile_id=profile_id,
+        content_hash="hash_01",
+        content_json={"name": "测试候选人"},
+    )
+    await app_repo.create_application(
+        app_id=app_id,
+        application_key=f"{profile_id}:{app_id}:2027",
+        candidate_id=profile_id,
+        canonical_job_id="job_01",
+        company_name="中国移动",
+        job_title="算法工程师",
+        recruitment_cycle="2027-campus",
+    )
+    await app_repo.create_run(
+        run_id=run_id,
+        application_id=app_id,
+        run_index=1,
+        profile_revision_id=rev_id,
+        adapter_name="italent",
+        adapter_version="1.0.0",
+        mapper_version="1.0.0",
+        config_hash="cfg_01",
+    )
+
+
 @pytest.mark.asyncio
 async def test_init_db_and_foreign_keys(tmp_path: Path):
     db_file = tmp_path / "test.db"
     await init_db(db_file)
 
     async with aiosqlite.connect(db_file) as db:
+        await db.execute("PRAGMA foreign_keys = ON;")
         async with db.execute("PRAGMA foreign_keys;") as cursor:
             row = await cursor.fetchone()
             assert row[0] == 1
@@ -63,8 +102,12 @@ async def test_foreign_key_enforcement(tmp_path: Path):
     db_file = tmp_path / "test.db"
     await init_db(db_file)
 
-    # Attempt to insert into application_runs without existing application should fail FK check
     app_repo = ApplicationRepository(db_file)
+    chk_repo = CheckpointRepository(db_file)
+    event_repo = EventRepository(db_file)
+    snap_repo = SnapshotRepository(db_file)
+
+    # 1. Inserting run with non-existent application should fail
     with pytest.raises(sqlite3.IntegrityError):
         await app_repo.create_run(
             run_id="run_nonexistent",
@@ -77,33 +120,52 @@ async def test_foreign_key_enforcement(tmp_path: Path):
             config_hash="hash_01",
         )
 
+    # 2. Inserting checkpoint with non-existent run should fail
+    with pytest.raises(sqlite3.IntegrityError):
+        await chk_repo.save_checkpoint(
+            checkpoint_id="chk_invalid_run",
+            application_id="app_does_not_exist",
+            run_id="run_does_not_exist",
+            page_url="https://example.com",
+        )
+
+    # 3. Inserting event with non-existent run should fail
+    with pytest.raises(sqlite3.IntegrityError):
+        await event_repo.append_event(
+            event_id="evt_invalid_run",
+            run_id="run_does_not_exist",
+            event_type="TEST",
+            payload_json={},
+        )
+
+    # 4. Inserting form snapshot with non-existent run should fail
+    with pytest.raises(sqlite3.IntegrityError):
+        await snap_repo.save_snapshot(
+            snapshot_id="snap_invalid_run",
+            run_id="run_does_not_exist",
+            page_url="https://example.com",
+            dom_fingerprint="fp",
+            fields_meta_json=[],
+        )
+
 
 @pytest.mark.asyncio
 async def test_checkpoint_materialization(tmp_path: Path):
     db_file = tmp_path / "test.db"
     await init_db(db_file)
 
-    app_repo = ApplicationRepository(db_file)
-    chk_repo = CheckpointRepository(db_file)
-
     app_id = "app_test_01"
-    await app_repo.create_application(
-        app_id=app_id,
-        application_key="cand_1:job_1:2027",
-        candidate_id="cand_1",
-        canonical_job_id="job_1",
-        company_name="中国移动",
-        job_title="算法工程师",
-        recruitment_cycle="2027-campus",
-    )
+    run_id = "run_01"
+    await _create_test_run(db_file, app_id=app_id, run_id=run_id)
 
+    chk_repo = CheckpointRepository(db_file)
     await chk_repo.save_checkpoint(
         checkpoint_id="chk_01",
         application_id=app_id,
-        run_id="run_01",
+        run_id=run_id,
         page_url="https://italent.cn/apply/step2",
         stage_key="education",
-        snapshot_id="snap_01",
+        snapshot_id=None,
         last_completed_field_sig="sig_school",
         status="paused",
     )
@@ -120,24 +182,17 @@ async def test_checkpoint_ordering_and_lookup(tmp_path: Path):
     db_file = tmp_path / "test.db"
     await init_db(db_file)
 
-    app_repo = ApplicationRepository(db_file)
-    chk_repo = CheckpointRepository(db_file)
-
     app_id = "app_test_order"
-    await app_repo.create_application(
-        app_id=app_id,
-        application_key="cand_1:job_order:2027",
-        candidate_id="cand_1",
-        canonical_job_id="job_order",
-        company_name="测试公司",
-        job_title="工程师",
-    )
+    run_id = "run_order_01"
+    await _create_test_run(db_file, app_id=app_id, run_id=run_id)
+
+    chk_repo = CheckpointRepository(db_file)
 
     # Save multiple checkpoints with explicit created_at
     await chk_repo.save_checkpoint(
         checkpoint_id="chk_first",
         application_id=app_id,
-        run_id="run_01",
+        run_id=run_id,
         page_url="https://example.com/step1",
         stage_key="basic",
         created_at="2026-09-12T10:00:00Z",
@@ -145,7 +200,7 @@ async def test_checkpoint_ordering_and_lookup(tmp_path: Path):
     await chk_repo.save_checkpoint(
         checkpoint_id="chk_second",
         application_id=app_id,
-        run_id="run_01",
+        run_id=run_id,
         page_url="https://example.com/step2",
         stage_key="education",
         created_at="2026-09-12T10:05:00Z",
@@ -255,21 +310,24 @@ async def test_event_repository(tmp_path: Path):
     db_file = tmp_path / "test.db"
     await init_db(db_file)
 
+    run_id = "run_evt_01"
+    await _create_test_run(db_file, app_id="app_evt_01", run_id=run_id)
+
     event_repo = EventRepository(db_file)
     await event_repo.append_event(
         event_id="evt_01",
-        run_id="run_01",
+        run_id=run_id,
         event_type="FIELD_FILLED",
         payload_json={"field": "mobile", "status": "success"},
     )
     await event_repo.append_event(
         event_id="evt_02",
-        run_id="run_01",
+        run_id=run_id,
         event_type="NAVIGATED",
         payload_json='{"url": "https://example.com/step2"}',
     )
 
-    events = await event_repo.list_events_by_run("run_01")
+    events = await event_repo.list_events_by_run(run_id)
     assert len(events) == 2
     assert events[0]["id"] == "evt_01"
     assert events[0]["event_type"] == "FIELD_FILLED"
@@ -282,10 +340,13 @@ async def test_snapshot_repository(tmp_path: Path):
     db_file = tmp_path / "test.db"
     await init_db(db_file)
 
+    run_id = "run_snap_01"
+    await _create_test_run(db_file, app_id="app_snap_01", run_id=run_id)
+
     snap_repo = SnapshotRepository(db_file)
     await snap_repo.save_snapshot(
         snapshot_id="snap_01",
-        run_id="run_01",
+        run_id=run_id,
         page_url="https://example.com/form",
         dom_fingerprint="fingerprint_abc",
         fields_meta_json=[{"id": "name", "type": "text"}],
@@ -316,7 +377,7 @@ async def test_snapshot_repository(tmp_path: Path):
     # Test field actions
     await snap_repo.save_field_action(
         action_id="act_01",
-        run_id="run_01",
+        run_id=run_id,
         snapshot_id="snap_01",
         field_signature="sig_name",
         mapping_id="map_01",
@@ -327,7 +388,7 @@ async def test_snapshot_repository(tmp_path: Path):
         observed_hash="h1",
         value_preview="李四",
     )
-    actions = await snap_repo.list_field_actions("run_01")
+    actions = await snap_repo.list_field_actions(run_id)
     assert len(actions) == 1
     assert actions[0]["id"] == "act_01"
     assert actions[0]["status"] == "success"
