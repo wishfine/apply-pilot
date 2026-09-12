@@ -453,17 +453,51 @@ async def test_revision_repository(tmp_path: Path):
     assert prof_rev["content_hash"] == "hash_p1"
     assert '"张三"' in prof_rev["content_json"]
 
+    # Test get_latest_profile_revision
+    await rev_repo.save_profile_revision(
+        revision_id="rev_prof_02",
+        profile_id="cand_prof_01",
+        content_hash="hash_02",
+        content_json={"name": "Zhang San Updated"},
+    )
+    latest = await rev_repo.get_latest_profile_revision("cand_prof_01")
+    assert latest is not None
+    assert latest["id"] == "rev_prof_02"
+    assert latest["content_hash"] == "hash_02"
+
     await rev_repo.save_variant_revision(
         revision_id="rev_var_01",
         variant_id="var_1",
         content_hash="hash_v1",
-        content_json={"summary": "前端专家"},
+        content_json={"summary": "algo_specialist"},
     )
     var_rev = await rev_repo.get_variant_revision("rev_var_01")
     assert var_rev is not None
     assert var_rev["variant_id"] == "var_1"
-    assert '"前端专家"' in var_rev["content_json"]
+    assert '"algo_specialist"' in var_rev["content_json"]
 
     # Nonexistent revisions return None
     assert await rev_repo.get_profile_revision("nonexistent") is None
     assert await rev_repo.get_variant_revision("nonexistent") is None
+
+
+@pytest.mark.asyncio
+async def test_correction_repository_increment_hit_count(tmp_path: Path):
+    db_file = tmp_path / "test.db"
+    await init_db(db_file)
+    corr_repo = CorrectionRepository(db_file)
+
+    await corr_repo.save_correction(
+        correction_id="corr_hit_01",
+        provider="beisen",
+        normalized_label="最高学位",
+        field_type="select",
+        corrected_semantic_path="education[__HIGHEST__].academic_degree",
+        hit_count=1,
+    )
+    corrections = await corr_repo.lookup_corrections("beisen", "最高学位")
+    assert corrections[0]["hit_count"] == 1
+
+    await corr_repo.increment_hit_count("corr_hit_01")
+    updated = await corr_repo.lookup_corrections("beisen", "最高学位")
+    assert updated[0]["hit_count"] == 2

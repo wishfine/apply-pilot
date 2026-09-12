@@ -1,5 +1,6 @@
 """Storage repositories for SQLite persistence layer."""
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -11,10 +12,25 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _to_json_str(val: Union[str, Dict[str, Any], List[Any]]) -> str:
+def _to_json_str(val: Any) -> str:
     if isinstance(val, str):
         return val
-    return json.dumps(val, ensure_ascii=False)
+    return json.dumps(val, ensure_ascii=False, default=str)
+
+
+class BaseRepository:
+    """Base repository providing standardized async connection management."""
+
+    def __init__(self, db_path: Union[Path, str]):
+        self.db_path = Path(db_path)
+
+    @asynccontextmanager
+    async def get_connection(self, enforce_fk: bool = True) -> AsyncIterator[aiosqlite.Connection]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            if enforce_fk:
+                await db.execute("PRAGMA foreign_keys = ON;")
+            yield db
 
 
 class ApplicationRepository:
@@ -541,6 +557,20 @@ class CorrectionRepository:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
 
+    async def increment_hit_count(self, memory_id: str) -> None:
+        now = _utc_now_iso()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA foreign_keys = ON;")
+            await db.execute(
+                """
+                UPDATE correction_memories
+                SET hit_count = hit_count + 1, last_used_at = ?
+                WHERE id = ?
+                """,
+                (now, memory_id),
+            )
+            await db.commit()
+
 
 class RevisionRepository:
     """Repository for candidate profile and resume variant revisions."""
@@ -581,6 +611,21 @@ class RevisionRepository:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
 
+    async def get_latest_profile_revision(self, profile_id: str) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT * FROM profile_revisions
+                WHERE profile_id = ?
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                (profile_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
     async def save_variant_revision(
         self,
         revision_id: str,
@@ -603,6 +648,16 @@ class RevisionRepository:
                 (revision_id, variant_id, content_hash, content, now),
             )
             await db.commit()
+
+    async def get_variant_revision(self, revision_id: str) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM resume_variant_revisions WHERE id = ?",
+                (revision_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
 
     async def get_variant_revision(self, revision_id: str) -> Optional[Dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
