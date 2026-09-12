@@ -25,6 +25,19 @@ class ValueKind(StrEnum):
     ENUM = "enum"
 
 
+# Precompiled regular expressions for performance and safety
+RE_DATE_FULL = re.compile(r"^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?$")
+RE_DATE_YM = re.compile(r"^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*月?$")
+RE_DATE_Y = re.compile(r"^(\d{4})\s*年?$")
+RE_DATE_C8 = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
+RE_DATE_C6 = re.compile(r"^(\d{4})(\d{2})$")
+RE_PHONE_CLEAN = re.compile(r"[\s\-_()+]")
+RE_CJK = re.compile(r"[\u4e00-\u9fff]")
+RE_LATIN = re.compile(r"[a-zA-Z]")
+RE_SPACES = re.compile(r"\s+")
+RE_DOTS_AND_SPACES = re.compile(r"[·•・\s]+")
+
+
 # Suffixes stripped from Chinese administrative division names
 CITY_SUFFIXES: list[str] = [
     "特别行政区",
@@ -48,6 +61,8 @@ DOCTOR_ALIASES = {
     "ph.d.",
     "博士生",
     "博士后",
+    "全日制博士",
+    "学术型博士",
 }
 
 MASTER_ALIASES = {
@@ -56,6 +71,13 @@ MASTER_ALIASES = {
     "硕士生",
     "master",
     "postgraduate",
+    "全日制硕士",
+    "统招硕士",
+    "非全日制硕士",
+    "学术型硕士",
+    "专业型硕士",
+    "专硕",
+    "学硕",
 }
 
 BACHELOR_ALIASES = {
@@ -64,6 +86,10 @@ BACHELOR_ALIASES = {
     "学士",
     "bachelor",
     "undergraduate",
+    "全日制本科",
+    "统招本科",
+    "普通全日制本科",
+    "非全日制本科",
 }
 
 ASSOCIATE_ALIASES = {
@@ -117,8 +143,8 @@ DEGREE_LEVEL_MAP: dict[str, set[str]] = {
     },
 }
 
-BOOLEAN_TRUE_SET = {"是", "yes", "true", "1", "y", "t", "确定", "对"}
-BOOLEAN_FALSE_SET = {"否", "no", "false", "0", "n", "f", "取消", "错"}
+BOOLEAN_TRUE_SET = {"是", "有", "yes", "true", "1", "y", "t", "确定", "对"}
+BOOLEAN_FALSE_SET = {"否", "无", "no", "false", "0", "n", "f", "取消", "错"}
 
 
 def _is_empty(val: Any) -> bool:
@@ -142,12 +168,18 @@ def normalize_city(val: Any) -> Optional[str]:
     if "省" in s and not s.endswith("省"):
         s = s.split("省")[-1].strip()
 
-    # Split by standard delimiters if present (e.g. "中国 / 北京")
-    for sep in ["/", ",", "-", " "]:
+    # Split by explicit hierarchy delimiters if present (e.g. "中国 / 北京", "中国-北京")
+    for sep in ["/", ",", "-", ">"]:
         if sep in s:
             parts = [p.strip() for p in s.split(sep) if p.strip()]
             if parts:
                 s = parts[-1]
+
+    # For space-separated Chinese hierarchy (e.g. "中国 北京"), split only if all parts contain CJK
+    if " " in s and RE_CJK.search(s):
+        parts = [p.strip() for p in s.split(" ") if p.strip()]
+        if len(parts) > 1 and all(RE_CJK.search(p) for p in parts):
+            s = parts[-1]
 
     # Strip recognized administrative division suffixes
     for suffix in CITY_SUFFIXES:
@@ -163,20 +195,23 @@ def normalize_education_level(val: Any) -> Optional[str]:
     if val is None:
         return None
     if isinstance(val, EducationLevel):
-        return val.value
+        return str(val.value).lower()
+
     s = str(val).strip().lower()
     if not s:
         return None
+
     if s in DOCTOR_ALIASES:
-        return EducationLevel.DOCTOR.value
+        return "doctor"
     if s in MASTER_ALIASES:
-        return EducationLevel.MASTER.value
+        return "master"
     if s in BACHELOR_ALIASES:
-        return EducationLevel.BACHELOR.value
+        return "bachelor"
     if s in ASSOCIATE_ALIASES:
-        return EducationLevel.ASSOCIATE.value
+        return "associate"
     if s in HIGH_SCHOOL_ALIASES:
-        return EducationLevel.HIGH_SCHOOL.value
+        return "high_school"
+
     return s
 
 
@@ -187,9 +222,13 @@ def parse_date_components(
     if val is None:
         return None
     if isinstance(val, PartialDate):
-        return (val.year, val.month, val.day)
+        if 1900 <= val.year <= 2100:
+            return (val.year, val.month, val.day)
+        return None
     if isinstance(val, (date, datetime)):
-        return (val.year, val.month, val.day)
+        if 1900 <= val.year <= 2100:
+            return (val.year, val.month, val.day)
+        return None
     if isinstance(val, int) and not isinstance(val, bool):
         if 1900 <= val <= 2100:
             return (val, None, None)
@@ -200,52 +239,54 @@ def parse_date_components(
         return None
 
     # Full date pattern: YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD, YYYY年MM月DD日
-    m_full = re.match(r"^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?$", s)
+    m_full = RE_DATE_FULL.match(s)
     if m_full:
         try:
             y, m, d = int(m_full.group(1)), int(m_full.group(2)), int(m_full.group(3))
-            if 1 <= m <= 12 and 1 <= d <= 31:
+            if 1900 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31:
                 return (y, m, d)
         except (ValueError, TypeError):
             return None
         return None
 
     # Year-Month pattern: YYYY-MM, YYYY/MM, YYYY.MM, YYYY年MM月
-    m_ym = re.match(r"^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*月?$", s)
+    m_ym = RE_DATE_YM.match(s)
     if m_ym:
         try:
             y, m = int(m_ym.group(1)), int(m_ym.group(2))
-            if 1 <= m <= 12:
+            if 1900 <= y <= 2100 and 1 <= m <= 12:
                 return (y, m, None)
         except (ValueError, TypeError):
             return None
         return None
 
     # Year only pattern: YYYY, YYYY年
-    m_y = re.match(r"^(\d{4})\s*年?$", s)
+    m_y = RE_DATE_Y.match(s)
     if m_y:
         try:
-            return (int(m_y.group(1)), None, None)
+            y = int(m_y.group(1))
+            if 1900 <= y <= 2100:
+                return (y, None, None)
         except (ValueError, TypeError):
             return None
 
     # Compact 8 digits: YYYYMMDD
-    m_c8 = re.match(r"^(\d{4})(\d{2})(\d{2})$", s)
+    m_c8 = RE_DATE_C8.match(s)
     if m_c8:
         try:
             y, m, d = int(m_c8.group(1)), int(m_c8.group(2)), int(m_c8.group(3))
-            if 1 <= m <= 12 and 1 <= d <= 31:
+            if 1900 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31:
                 return (y, m, d)
         except (ValueError, TypeError):
             return None
         return None
 
     # Compact 6 digits: YYYYMM
-    m_c6 = re.match(r"^(\d{4})(\d{2})$", s)
+    m_c6 = RE_DATE_C6.match(s)
     if m_c6:
         try:
             y, m = int(m_c6.group(1)), int(m_c6.group(2))
-            if 1 <= m <= 12:
+            if 1900 <= y <= 2100 and 1 <= m <= 12:
                 return (y, m, None)
         except (ValueError, TypeError):
             return None
@@ -358,17 +399,17 @@ def normalize_academic_degree(val: Any) -> Optional[str]:
 
 
 def normalize_person_name(val: Any) -> Optional[str]:
-    """Normalize person names (collapse internal space for CJK, normalize whitespace for Latin)."""
+    """Normalize person names (collapse internal space/dots for CJK, normalize whitespace for Latin)."""
     if val is None:
         return None
     s = str(val).strip()
     if not s:
         return None
-    # If contains Chinese characters and no Latin letters, strip all whitespace
-    if re.search(r"[\u4e00-\u9fff]", s) and not re.search(r"[a-zA-Z]", s):
-        return re.sub(r"\s+", "", s)
+    # If contains Chinese characters and no Latin letters, strip all whitespace and middle dots
+    if RE_CJK.search(s) and not RE_LATIN.search(s):
+        return RE_DOTS_AND_SPACES.sub("", s)
     # Latin / mixed: collapse multiple whitespace characters into single space
-    return re.sub(r"\s+", " ", s).lower()
+    return RE_SPACES.sub(" ", s).lower()
 
 
 def normalize_plain_text(val: Any) -> Optional[str]:
@@ -378,7 +419,7 @@ def normalize_plain_text(val: Any) -> Optional[str]:
     s = str(val).strip()
     if not s:
         return None
-    return re.sub(r"\s+", " ", s).lower()
+    return RE_SPACES.sub(" ", s).lower()
 
 
 def _get_degree_tier(s: str) -> Optional[str]:

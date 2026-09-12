@@ -582,3 +582,43 @@ class TestRegistryCustomExtensionAndRobustness:
             )
             is False
         )
+
+    def test_international_city_and_chinese_hierarchy(self):
+        # International city names with spaces must not be truncated
+        assert ValueNormalizerRegistry.are_equivalent(
+            ValueKind.CITY, "New York", "New York"
+        )
+        assert not ValueNormalizerRegistry.are_equivalent(
+            ValueKind.CITY, "York", "New York"
+        )
+        assert not ValueNormalizerRegistry.are_equivalent(
+            ValueKind.CITY, "Angeles", "Los Angeles"
+        )
+        # Chinese hierarchy with space
+        assert ValueNormalizerRegistry.are_equivalent(
+            ValueKind.CITY, "中国 北京", "北京"
+        )
+
+    def test_chinese_ats_aliases_and_minority_names(self):
+        # Boolean "有" / "无"
+        assert ValueNormalizerRegistry.are_equivalent(
+            ValueKind.BOOLEAN, "有", True
+        )
+        assert ValueNormalizerRegistry.are_equivalent(
+            ValueKind.BOOLEAN, "无", False
+        )
+        # ATS education prefix
+        assert ValueNormalizerRegistry.are_equivalent(
+            ValueKind.EDUCATION_LEVEL, "全日制本科", "bachelor"
+        )
+        assert ValueNormalizerRegistry.are_equivalent(
+            ValueKind.EDUCATION_LEVEL, "统招硕士", "master"
+        )
+        # Minority names with middle dots and spaces
+        assert ValueNormalizerRegistry.are_equivalent(
+            ValueKind.PERSON_NAME, "买买提·艾山", "买买提 艾山"
+        )
+        assert ValueNormalizerRegistry.are_equivalent(
+            ValueKind.PERSON_NAME, "买买提•艾山", "买买提·艾山"
+        )
+
