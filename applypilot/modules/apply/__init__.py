@@ -1,5 +1,7 @@
 """Apply module containing typed value normalization, element matching, and form automation."""
 
+from applypilot.domain.job import ApplicationStatus
+from applypilot.modules.apply.engine import ApplyEngine
 from applypilot.modules.apply.mapper import FieldMapper, FieldMappingResult
 from applypilot.modules.apply.normalizer import (
     ValueKind,
@@ -17,8 +19,11 @@ from applypilot.modules.apply.normalizer import (
 )
 
 __all__ = [
+    "ApplicationStatus",
+    "ApplyEngine",
     "FieldMapper",
     "FieldMappingResult",
+
     "ValueKind",
     "ValueNormalizerRegistry",
     "normalize_academic_degree",

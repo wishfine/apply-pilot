@@ -8,7 +8,7 @@ from applypilot.domain.base import (
     SensitivityLevel,
     TriState,
 )
-from applypilot.domain.job import ApplicationTarget, Job
+from applypilot.domain.job import ApplicationStatus, ApplicationTarget, Job
 from applypilot.domain.profile import (
     AssetRecord,
     CandidateProfile,
@@ -33,7 +33,9 @@ from applypilot.domain.variant import (
 )
 
 __all__ = [
+    "ApplicationStatus",
     "ApplicationTarget",
+
     "AssetRecord",
     "CandidateProfile",
     "ChinaCampusContext",

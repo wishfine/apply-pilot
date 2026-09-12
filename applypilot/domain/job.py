@@ -1,5 +1,4 @@
-"""Job posting and application target domain models."""
-
+from enum import StrEnum
 from typing import Optional
 from pydantic import BaseModel, Field
 from applypilot.domain.base import PartialDate
@@ -7,7 +6,19 @@ from applypilot.domain.profile import EducationLevel
 from applypilot.domain.variant import DisclosurePolicy
 
 
+class ApplicationStatus(StrEnum):
+    """Business lifecycle status for a job application."""
+
+    CREATED = "created"
+    IN_PROGRESS = "in_progress"
+    READY_REVIEW = "ready_review"
+    SUBMITTED = "submitted"
+    WITHDRAWN = "withdrawn"
+    EXPIRED = "expired"
+
+
 class Job(BaseModel):
+
     """Job posting specification crawled or imported from external channels."""
 
     job_id: str

@@ -124,12 +124,12 @@ class ApplicationRepository:
         self,
         run_id: str,
         application_id: str,
-        run_index: int,
-        profile_revision_id: str,
-        adapter_name: str,
-        adapter_version: str,
-        mapper_version: str,
-        config_hash: str,
+        run_index: int = 1,
+        profile_revision_id: str = "",
+        adapter_name: str = "generic",
+        adapter_version: str = "1.0.0",
+        mapper_version: str = "1.0.0",
+        config_hash: str = "default",
         status: str = "running",
         variant_revision_id: Optional[str] = None,
         llm_provider: Optional[str] = None,
@@ -137,8 +137,10 @@ class ApplicationRepository:
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         end_reason: Optional[str] = None,
+        **kwargs: Any,
     ) -> None:
         start = start_time or _utc_now_iso()
+
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys = ON;")
             await db.execute(
@@ -221,12 +223,13 @@ class CheckpointRepository:
         checkpoint_id: str,
         application_id: str,
         run_id: str,
-        page_url: str,
+        page_url: str = "",
         stage_key: Optional[str] = None,
         snapshot_id: Optional[str] = None,
         last_completed_field_sig: Optional[str] = None,
         status: str = "paused",
         created_at: Optional[str] = None,
+        **kwargs: Any,
     ) -> None:
         now = created_at or _utc_now_iso()
         async with aiosqlite.connect(self.db_path) as db:
@@ -287,12 +290,14 @@ class EventRepository:
 
     async def append_event(
         self,
-        event_id: str,
-        run_id: str,
-        event_type: str,
-        payload_json: Union[str, Dict[str, Any], List[Any]],
+        event_id: Optional[str] = None,
+        run_id: str = "",
+        event_type: str = "",
+        payload_json: Union[str, Dict[str, Any], List[Any]] = "",
         created_at: Optional[str] = None,
+        **kwargs: Any,
     ) -> None:
+        evt_id = event_id or f"evt_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
         now = created_at or _utc_now_iso()
         payload = _to_json_str(payload_json)
         async with aiosqlite.connect(self.db_path) as db:
@@ -304,9 +309,10 @@ class EventRepository:
                 )
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (event_id, run_id, event_type, payload, now),
+                (evt_id, run_id, event_type, payload, now),
             )
             await db.commit()
+
 
     async def list_events_by_run(self, run_id: str) -> List[Dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
