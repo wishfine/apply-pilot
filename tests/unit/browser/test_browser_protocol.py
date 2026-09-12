@@ -425,3 +425,42 @@ async def test_playwright_backend_default_wait_for_user_prints(capsys):
     captured = capsys.readouterr()
     assert "Please solve captcha manually" in captured.out
 
+
+@pytest.mark.asyncio
+async def test_action_rate_limiter_pacing():
+    from applypilot.browser.playwright_backend import ActionRateLimiter
+    import time
+
+    limiter = ActionRateLimiter(min_interval_ms=50)
+    t0 = time.monotonic()
+    await limiter.throttle()
+    await limiter.throttle()
+    elapsed = (time.monotonic() - t0) * 1000.0
+    assert elapsed >= 45.0  # throttled at least 50ms (with 5ms tolerance)
+
+    zero_limiter = ActionRateLimiter(min_interval_ms=0)
+    t0 = time.monotonic()
+    await zero_limiter.throttle()
+    await zero_limiter.throttle()
+    elapsed_zero = (time.monotonic() - t0) * 1000.0
+    assert elapsed_zero < 20.0
+
+
+@pytest.mark.asyncio
+async def test_playwright_backend_close_robustness(tmp_path: Path):
+    backend = PlaywrightBackend(headless=True, user_data_dir=tmp_path / "close_test")
+    mock_context = AsyncMock()
+    mock_context.close.side_effect = RuntimeError("Browser crashed")
+    mock_playwright = AsyncMock()
+    backend._context = mock_context
+    backend._playwright = mock_playwright
+
+    with pytest.raises(BrowserDriverError, match="close failed"):
+        await backend.close()
+
+    # Verify playwright.stop() was still called despite context.close() failure
+    mock_playwright.stop.assert_awaited_once()
+    assert backend._context is None
+    assert backend._playwright is None
+
+

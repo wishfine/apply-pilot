@@ -24,15 +24,17 @@ class ActionRateLimiter:
     def __init__(self, min_interval_ms: int = 150):
         self.min_interval_ms = min_interval_ms
         self._last_action_time: float = 0.0
+        self._lock = asyncio.Lock()
 
     async def throttle(self) -> None:
         if self.min_interval_ms <= 0:
             return
-        now = time.monotonic()
-        elapsed_ms = (now - self._last_action_time) * 1000.0
-        if elapsed_ms < self.min_interval_ms:
-            await asyncio.sleep((self.min_interval_ms - elapsed_ms) / 1000.0)
-        self._last_action_time = time.monotonic()
+        async with self._lock:
+            now = time.monotonic()
+            elapsed_ms = (now - self._last_action_time) * 1000.0
+            if elapsed_ms < self.min_interval_ms:
+                await asyncio.sleep((self.min_interval_ms - elapsed_ms) / 1000.0)
+            self._last_action_time = time.monotonic()
 
 
 class PlaywrightElement:
@@ -62,12 +64,15 @@ class PlaywrightElement:
     async def get_text(self) -> str:
         try:
             if hasattr(self._locator, "inner_text"):
-                val = await self._locator.inner_text(timeout=self._policy.action_timeout_ms)
-            elif hasattr(self._locator, "text_content"):
+                try:
+                    val = await self._locator.inner_text(timeout=min(2000, self._policy.action_timeout_ms))
+                    return val if val is not None else ""
+                except Exception:
+                    pass
+            if hasattr(self._locator, "text_content"):
                 val = await self._locator.text_content(timeout=self._policy.action_timeout_ms)
-            else:
-                val = ""
-            return val if val is not None else ""
+                return val if val is not None else ""
+            return ""
         except BrowserDriverError:
             raise
         except Exception as e:
@@ -138,6 +143,12 @@ class PlaywrightElement:
     async def get_bounding_rect(self) -> ElementRect:
         try:
             box = await self._locator.bounding_box(timeout=self._policy.action_timeout_ms)
+            if box is None and hasattr(self._locator, "scroll_into_view_if_needed"):
+                try:
+                    await self._locator.scroll_into_view_if_needed(timeout=2000)
+                    box = await self._locator.bounding_box(timeout=2000)
+                except Exception:
+                    pass
             if box is None:
                 raise BrowserDriverError("Element has no bounding box (it may be invisible or detached)")
             if isinstance(box, ElementRect):
@@ -308,21 +319,41 @@ class PlaywrightBackend:
         self._context: Optional[Any] = None
         self._current_page: Optional[PlaywrightPage] = None
         self._rate_limiter = ActionRateLimiter(min_interval_ms=self.policy.min_action_interval_ms)
+        self._lock = asyncio.Lock()
 
     async def _ensure_context(self) -> Any:
-        if self._context is None:
-            try:
-                Path(self.user_data_dir).mkdir(parents=True, exist_ok=True)
-                if self._playwright is None:
-                    self._playwright = await async_playwright().start()
-                self._context = await self._playwright.chromium.launch_persistent_context(
-                    user_data_dir=str(self.user_data_dir),
-                    headless=self.headless,
-                )
-            except BrowserDriverError:
-                raise
-            except Exception as e:
-                raise BrowserDriverError(f"Failed to launch browser context: {e}") from e
+        async with self._lock:
+            is_closed = False
+            if self._context is not None:
+                try:
+                    if hasattr(self._context, "is_closed"):
+                        res = self._context.is_closed()
+                        if asyncio.iscoroutine(res):
+                            res = await res
+                        if isinstance(res, bool):
+                            is_closed = res
+                except Exception:
+                    is_closed = True
+
+            if self._context is None or is_closed:
+                try:
+                    Path(self.user_data_dir).mkdir(parents=True, exist_ok=True)
+                    if self._playwright is None:
+                        self._playwright = await async_playwright().start()
+                    self._context = await self._playwright.chromium.launch_persistent_context(
+                        user_data_dir=str(self.user_data_dir),
+                        headless=self.headless,
+                    )
+                except BrowserDriverError:
+                    raise
+                except Exception as e:
+                    if self._playwright is not None and self._context is None:
+                        try:
+                            await self._playwright.stop()
+                        except Exception:
+                            pass
+                        self._playwright = None
+                    raise BrowserDriverError(f"Failed to launch browser context: {e}") from e
         return self._context
 
     async def open_page(self, url: str) -> BrowserPage:
@@ -337,10 +368,23 @@ class PlaywrightBackend:
                         page = candidate
                 except Exception:
                     pass
+            newly_opened = False
             if page is None:
                 page = await self._context.new_page()
+                newly_opened = True
 
-            await page.goto(url, timeout=self.policy.action_timeout_ms)
+            try:
+                await page.goto(url, timeout=self.policy.action_timeout_ms)
+            except Exception:
+                if newly_opened and hasattr(page, "close"):
+                    try:
+                        res = page.close()
+                        if asyncio.iscoroutine(res):
+                            await res
+                    except Exception:
+                        pass
+                raise
+
             self._current_page = PlaywrightPage(page, policy=self.policy, rate_limiter=self._rate_limiter)
             return self._current_page
         except BrowserDriverError:
@@ -352,12 +396,42 @@ class PlaywrightBackend:
         try:
             await self._ensure_context()
             if self._current_page is not None:
-                return self._current_page
-            if self._context.pages:
-                page = self._context.pages[-1]
-                self._current_page = PlaywrightPage(page, policy=self.policy, rate_limiter=self._rate_limiter)
-                return self._current_page
-            page = await self._context.new_page()
+                page_obj = getattr(self._current_page, "_page", None)
+                is_closed = False
+                if page_obj and hasattr(page_obj, "is_closed"):
+                    try:
+                        res = page_obj.is_closed()
+                        if asyncio.iscoroutine(res):
+                            res = await res
+                        if isinstance(res, bool):
+                            is_closed = res
+                    except Exception:
+                        is_closed = True
+                if not is_closed:
+                    return self._current_page
+                self._current_page = None
+
+            open_pages = []
+            if hasattr(self._context, "pages") and self._context.pages:
+                for p in self._context.pages:
+                    p_closed = False
+                    if hasattr(p, "is_closed"):
+                        try:
+                            res = p.is_closed()
+                            if asyncio.iscoroutine(res):
+                                res = await res
+                            if isinstance(res, bool):
+                                p_closed = res
+                        except Exception:
+                            p_closed = True
+                    if not p_closed:
+                        open_pages.append(p)
+
+            if open_pages:
+                page = open_pages[-1]
+            else:
+                page = await self._context.new_page()
+
             self._current_page = PlaywrightPage(page, policy=self.policy, rate_limiter=self._rate_limiter)
             return self._current_page
         except BrowserDriverError:
@@ -375,18 +449,24 @@ class PlaywrightBackend:
         print(f"\n[ApplyPilot] Human action required: {reason}")
 
     async def close(self) -> None:
-        try:
-            if self._context is not None:
+        errors: list[Exception] = []
+        if self._context is not None:
+            try:
                 await self._context.close()
+            except Exception as e:
+                errors.append(e)
+            finally:
                 self._context = None
-            if self._playwright is not None:
+        if self._playwright is not None:
+            try:
                 await self._playwright.stop()
+            except Exception as e:
+                errors.append(e)
+            finally:
                 self._playwright = None
-            self._current_page = None
-        except BrowserDriverError:
-            raise
-        except Exception as e:
-            raise BrowserDriverError(f"close failed: {e}") from e
+        self._current_page = None
+        if errors:
+            raise BrowserDriverError(f"close failed: {errors[0]}") from errors[0]
 
     async def __aenter__(self):
         await self._ensure_context()
