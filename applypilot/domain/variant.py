@@ -4,11 +4,15 @@ from pydantic import BaseModel, Field
 
 
 class VariantBullet(BaseModel):
-    """Fact-traceable bullet point configured for a resume variant."""
+    """Resume bullet point tailored for a specific role or variant."""
 
     text: str
-    source_fact_ids: list[str] = Field(..., description="必须显式关联主事实库经历或bullet ID")
-    generated_by: str = "user"  # "user" | "llm_polished"
+    source_fact_ids: list[str] = Field(
+        ...,
+        min_length=1,
+        description="必须显式关联主事实库经历或bullet ID",
+    )
+    generated_by: str = "user"
     verified: bool = True
 
 

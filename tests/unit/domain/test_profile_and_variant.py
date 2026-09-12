@@ -209,9 +209,13 @@ def test_disclosure_policy_defaults_and_blocking():
 
 
 def test_bullet_requires_source_fact_ids():
-    with pytest.raises(Exception):
-        # source_fact_ids is required
-        VariantBullet(text="test bullet without source")
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        VariantBullet(text="invalid bullet without facts")
+
+    with pytest.raises(ValidationError):
+        VariantBullet(text="invalid bullet with empty facts", source_fact_ids=[])
 
 
 def test_domain_package_exports():
