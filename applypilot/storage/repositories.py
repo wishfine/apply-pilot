@@ -91,6 +91,29 @@ class ApplicationRepository:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
 
+    async def list_applications(
+        self,
+        status: Optional[str] = None,
+        candidate_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            query = "SELECT * FROM applications"
+            params: list[Any] = []
+            conditions: list[str] = []
+            if status:
+                conditions.append("status = ?")
+                params.append(status)
+            if candidate_id:
+                conditions.append("candidate_id = ?")
+                params.append(candidate_id)
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            query += " ORDER BY updated_at DESC"
+            async with db.execute(query, params) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(r) for r in rows]
+
     async def update_status(
         self,
         app_id: str,
