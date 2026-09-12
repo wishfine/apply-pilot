@@ -10,17 +10,17 @@ class FormRequirementDetector:
     """Sniffs whether a DOM form element represents a required field across recruitment ATS platforms."""
 
     _OPTIONAL_PATTERN = re.compile(
-        r"选填|(\(|（|\[|【)\s*optional\s*(\)|）|\]|】)",
+        r"选填|非必填|(\(|（|\[|【)\s*optional\s*(\)|）|\]|】)",
         re.IGNORECASE,
     )
 
     _CONTAINER_REQUIRED_CLASS_PATTERN = re.compile(
-        r'class="[^"]*\b(is-required|required|form-required|item-required|ant-form-item-required)\b[^"]*"',
+        r'class\s*=\s*["\'][^"\']*\b(is-required|required|form-required|item-required|ant-form-item-required)\b[^"\']*["\']',
         re.IGNORECASE,
     )
 
     _REQUIRED_INDICATOR_TAG_PATTERN = re.compile(
-        r'<(?:span|em|i|b)[^>]*class="[^"]*\b(star|required|must)\b[^"]*"[^>]*>',
+        r'<(?:span|em|i|b)[^>]*class\s*=\s*["\'][^"\']*\b(star|required|must)\b[^"\']*["\'][^>]*>',
         re.IGNORECASE,
     )
 
@@ -34,7 +34,7 @@ class FormRequirementDetector:
         """Evaluate whether a form element is strictly required.
 
         Precedence order:
-        1. Explicit optional downgrade (e.g. '(选填)', '(optional)') -> returns False.
+        1. Explicit optional downgrade (e.g. '(选填)', '(非必填)', '(optional)') -> returns False.
         2. HTML native attributes ('required', 'aria-required="true"') -> returns True.
         3. Label content ('*', '必填') -> returns True.
         4. Outer HTML container and ATS markers ('is-required', 'ant-form-item-required', '<span class="star">*</span>') -> returns True.
@@ -59,8 +59,8 @@ class FormRequirementDetector:
         # 2. HTML Native Attributes
         if "required" in attrs:
             val = attrs["required"]
-            # Attributes can be True, "", "required", or non-empty string
-            if val is not False and val != "false":
+            # Attributes can be True, "", "required", or non-empty string not equal to "false"
+            if val is not False and str(val).strip().lower() != "false":
                 return True
 
         aria_required = attrs.get("aria-required")
