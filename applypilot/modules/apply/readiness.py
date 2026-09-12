@@ -9,9 +9,23 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 import yaml
 
+from applypilot.domain.base import TriState
 from applypilot.domain.profile import CandidateProfile
 from applypilot.domain.variant import ResumeVariant
 from applypilot.modules.profile.resolver import ValueResolver
+
+
+def _is_meaningful_value(val: Any) -> bool:
+    """Evaluate whether a value represents non-empty factual content."""
+    if val is None:
+        return False
+    if val == TriState.UNKNOWN:
+        return False
+    if isinstance(val, str) and not val.strip():
+        return False
+    if isinstance(val, (list, dict, set)) and len(val) == 0:
+        return False
+    return True
 
 
 class FormRequirementDetector:
@@ -162,16 +176,18 @@ class ReadinessAuditor:
                 )
 
             mapped_path = field.get("mapped_path") or field.get("profile_path")
-            observed_value = field.get("observed_value") or field.get("current_value")
+            observed_value = field.get("observed_value")
+            if observed_value is None:
+                observed_value = field.get("current_value")
 
             is_filled = False
-            # 1. Check if observed DOM value is non-empty
-            if observed_value is not None and str(observed_value).strip() != "":
+            # 1. Check if observed DOM value is meaningful (e.g. 0, False, non-empty string)
+            if _is_meaningful_value(observed_value):
                 is_filled = True
-            # 2. Check if profile / variant path resolves to a valid value
+            # 2. Check if profile / variant path resolves to a meaningful value
             elif mapped_path:
                 resolved = ValueResolver.resolve(profile, variant, mapped_path)
-                if resolved is not None and resolved != "" and resolved != [] and resolved != {}:
+                if _is_meaningful_value(resolved):
                     is_filled = True
 
             # Determine status
@@ -180,8 +196,10 @@ class ReadinessAuditor:
                 suggested_fix = None
             elif is_required:
                 status = FieldReadinessStatus.REQUIRED_MISSING
-                target_hint = mapped_path or label or field_sig
-                suggested_fix = f"请在 profile.yaml 中配置 {target_hint}"
+                if mapped_path:
+                    suggested_fix = f"请在 profile.yaml 中配置 {mapped_path}"
+                else:
+                    suggested_fix = f"未映射字段 '{label}'，请在浏览器中手动填写或配置映射规则"
             else:
                 status = FieldReadinessStatus.OPTIONAL_EMPTY
                 suggested_fix = None
@@ -238,18 +256,26 @@ class ProfileWritebackSynchronizer:
 
         Raises:
             FileNotFoundError: If the profile file does not exist.
+            ValueError: If profile_path_key contains array indexing or has an invalid root key.
             ValidationError: If the resulting profile schema is invalid.
         """
         path = Path(profile_path)
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(f"Profile file not found at: {path}")
 
+        if "[" in profile_path_key or "]" in profile_path_key:
+            raise ValueError(f"Array-indexed writeback is not supported: {profile_path_key}")
+
+        keys = profile_path_key.strip().split(".")
+        root_key = keys[0]
+        if root_key not in CandidateProfile.model_fields:
+            raise ValueError(f"Invalid profile root key: '{root_key}'")
+
         raw_content = path.read_text(encoding="utf-8")
         data = yaml.safe_load(raw_content) or {}
         if not isinstance(data, dict):
             data = {}
 
-        keys = profile_path_key.strip().split(".")
         curr = data
         for key in keys[:-1]:
             if key not in curr or not isinstance(curr[key], dict):
@@ -261,4 +287,7 @@ class ProfileWritebackSynchronizer:
         CandidateProfile.model_validate(data)
 
         yaml_str = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
-        path.write_text(yaml_str, encoding="utf-8")
+        tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+        tmp_path.write_text(yaml_str, encoding="utf-8")
+        tmp_path.replace(path)
+

@@ -2,6 +2,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from applypilot.domain.base import TriState
 from applypilot.domain.profile import CandidateProfile, ContactInfo, IdentityInfo
 from applypilot.modules.apply.readiness import (
     FieldReadinessItem,
@@ -91,6 +92,23 @@ def test_readiness_auditor_missing_required_field(sample_profile: CandidateProfi
     assert missing.status == FieldReadinessStatus.REQUIRED_MISSING
     assert missing.suggested_fix is not None
     assert "profile.yaml" in missing.suggested_fix
+    assert "soe_extended.political_status" in missing.suggested_fix
+
+
+def test_readiness_auditor_unmapped_required_field_suggested_fix(sample_profile: CandidateProfile):
+    scanned_fields = [
+        {
+            "field_sig": "sig_custom",
+            "label": "补充说明",
+            "is_required": True,
+            "mapped_path": None,
+        }
+    ]
+
+    report = ReadinessAuditor.audit_fields(scanned_fields, sample_profile)
+    assert report.is_ready is False
+    missing = report.missing_required[0]
+    assert "未映射字段 '补充说明'" in missing.suggested_fix
 
 
 def test_readiness_auditor_optional_empty_field(sample_profile: CandidateProfile):
@@ -125,6 +143,47 @@ def test_readiness_auditor_observed_dom_value_fills_field(sample_profile: Candid
     assert report.is_ready is True
     assert report.filled_fields == 1
     assert report.all_items[0].status == FieldReadinessStatus.FILLED
+
+
+def test_readiness_auditor_falsy_dom_values_count_as_filled(sample_profile: CandidateProfile):
+    scanned_fields = [
+        {
+            "field_sig": "sig_years",
+            "label": "工作经验年数",
+            "is_required": True,
+            "observed_value": 0,
+        },
+        {
+            "field_sig": "sig_dispute",
+            "label": "是否有违约记录",
+            "is_required": True,
+            "current_value": False,
+        },
+    ]
+
+    report = ReadinessAuditor.audit_fields(scanned_fields, sample_profile)
+    assert report.is_ready is True
+    assert report.filled_fields == 2
+    assert report.all_items[0].status == FieldReadinessStatus.FILLED
+    assert report.all_items[1].status == FieldReadinessStatus.FILLED
+
+
+def test_readiness_auditor_tristate_unknown_not_counted_as_filled(sample_profile: CandidateProfile):
+    # campus_context.has_dispatch_qualification defaults to TriState.UNKNOWN
+    assert sample_profile.campus_context.has_dispatch_qualification == TriState.UNKNOWN
+
+    scanned_fields = [
+        {
+            "field_sig": "sig_dispatch",
+            "label": "派遣资格",
+            "is_required": True,
+            "mapped_path": "campus_context.has_dispatch_qualification",
+        }
+    ]
+
+    report = ReadinessAuditor.audit_fields(scanned_fields, sample_profile)
+    assert report.is_ready is False
+    assert report.missing_required[0].status == FieldReadinessStatus.REQUIRED_MISSING
 
 
 def test_readiness_auditor_detector_fallback_for_is_required(sample_profile: CandidateProfile):
@@ -169,3 +228,17 @@ def test_profile_writeback_synchronizer_missing_file_raises(tmp_path: Path):
     missing_file = tmp_path / "not_found.yaml"
     with pytest.raises(FileNotFoundError):
         ProfileWritebackSynchronizer.sync_field(missing_file, "identity.name", "李四")
+
+
+def test_profile_writeback_synchronizer_invalid_keys_raises(tmp_path: Path, sample_profile: CandidateProfile):
+    profile_file = tmp_path / "profile.yaml"
+    profile_dict = sample_profile.model_dump(mode="json", exclude_none=True)
+    profile_file.write_text(yaml.safe_dump(profile_dict, allow_unicode=True), encoding="utf-8")
+
+    # Array indexing should be rejected
+    with pytest.raises(ValueError, match="Array-indexed writeback is not supported"):
+        ProfileWritebackSynchronizer.sync_field(profile_file, "education[0].school_name", "清华")
+
+    # Invalid root key should be rejected
+    with pytest.raises(ValueError, match="Invalid profile root key: 'unknown_root'"):
+        ProfileWritebackSynchronizer.sync_field(profile_file, "unknown_root.field", "value")
