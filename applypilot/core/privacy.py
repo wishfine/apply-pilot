@@ -13,27 +13,38 @@ def get_local_audit_secret() -> bytes:
     """Retrieve or generate local persistent 32-byte audit secret."""
     secret_path = get_app_home_dir() / ".audit_secret"
     if secret_path.exists():
-        return secret_path.read_bytes()
+        content = secret_path.read_bytes()
+        if len(content) == 32:
+            return content
+
     secret = os.urandom(32)
-    secret_path.write_bytes(secret)
     try:
-        os.chmod(secret_path, 0o600)
-    except Exception:
-        pass
+        fd = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with open(fd, "wb") as f:
+            f.write(secret)
+    except FileExistsError:
+        content = secret_path.read_bytes()
+        if len(content) == 32:
+            return content
+        secret_path.write_bytes(secret)
+    except OSError:
+        secret_path.write_bytes(secret)
+        try:
+            os.chmod(secret_path, 0o600)
+        except OSError:
+            pass
     return secret
 
 
 class AuditSanitizer:
-    """Sanitizer for audit logs and LLM boundaries."""
+    """Sanitizes audit events and computes collision-resistant HMAC fingerprints."""
 
     @staticmethod
     def compute_fingerprint(
         audit_secret: bytes,
         raw: Optional[str] = None,
-        *,
         raw_value: Optional[str] = None,
     ) -> Optional[str]:
-        """Compute an HMAC-SHA256 fingerprint for a raw value with whitespace normalized and lowercased."""
         val = raw if raw is not None else raw_value
         if val is None:
             return None
@@ -45,22 +56,25 @@ class AuditSanitizer:
     def mask_value(
         policy: Optional[FieldPolicy] = None,
         raw: Optional[str] = None,
-        *,
         field_policy: Optional[FieldPolicy] = None,
         raw_value: Optional[str] = None,
     ) -> Optional[str]:
-        """Mask or omit a raw value based on FieldPolicy."""
         pol = policy if policy is not None else field_policy
         val = raw if raw is not None else raw_value
-        if pol is None or not val:
+        if pol is None or val is None:
             return None
+
+        val_str = str(val).strip()
+        if not val_str:
+            return None
+
+        # Highest privacy levels must NEVER leak into logs or audit snapshots
         if pol.sensitivity in (SensitivityLevel.SENSITIVE, SensitivityLevel.SECRET):
             return None
         if pol.log_strategy == LogStrategy.OMIT:
             return None
         if pol.log_strategy == LogStrategy.MASK:
-            val_str = str(val).strip()
             if len(val_str) <= 4:
                 return "***"
             return f"{val_str[:2]}****{val_str[-2:]}"
-        return str(val).strip()
+        return val_str

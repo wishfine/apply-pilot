@@ -93,15 +93,16 @@ def test_mask_value_for_plain_strategy():
     assert AuditSanitizer.mask_value(policy, " Alice ") == "Alice"
 
 
-def test_mask_value_none_or_empty():
+def test_mask_value_empty_and_none():
     policy = FieldPolicy(
-        path_pattern="contact.mobile",
-        sensitivity=SensitivityLevel.PERSONAL,
-        llm_allowed=False,
+        path_pattern="contact.city",
+        sensitivity=SensitivityLevel.NORMAL,
+        llm_allowed=True,
         log_strategy=LogStrategy.MASK,
     )
-    assert AuditSanitizer.mask_value(policy, None) is None
     assert AuditSanitizer.mask_value(policy, "") is None
+    assert AuditSanitizer.mask_value(policy, None) is None
+    assert AuditSanitizer.mask_value(policy, "   ") is None
 
 
 def test_get_local_audit_secret(tmp_path, monkeypatch):
