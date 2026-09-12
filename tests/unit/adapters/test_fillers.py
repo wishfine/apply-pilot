@@ -116,6 +116,25 @@ async def test_file_upload_filler_exception_handling(tmp_path: Path):
     assert res.recoverable is True
 
 
+@pytest.mark.asyncio
+async def test_file_upload_filler_expanduser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    test_file = tmp_path / "resume_tilde.pdf"
+    test_file.write_text("tilde resume", encoding="utf-8")
+
+    filler = FileUploadFiller()
+    mock_el = AsyncMock()
+    mock_el.set_files = AsyncMock()
+    mock_page = AsyncMock()
+
+    res = await filler.fill(mock_page, mock_el, "~/resume_tilde.pdf")
+    assert res.success is True
+    assert res.action_type == "set_files"
+    assert res.observed_value == str(test_file)
+    assert res.verification_status == "verified_match"
+    mock_el.set_files.assert_awaited_with([str(test_file)])
+
+
 # =============================================================================
 # 2. NativeSelectFiller Tests
 # =============================================================================
@@ -206,6 +225,186 @@ async def test_radio_checkbox_filler_not_interactable():
     assert res.success is False
     assert res.error_code == "ELEMENT_NOT_INTERACTABLE"
     assert res.recoverable is False
+
+
+@pytest.mark.asyncio
+async def test_radio_button_option_matching():
+    filler = RadioCheckboxFiller()
+    mock_page = AsyncMock()
+
+    # 1. Matching option value -> clicked when unchecked
+    mock_el_match = AsyncMock()
+    mock_el_match.click = AsyncMock()
+    mock_el_match.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "radio", "value": "male"}.get(attr)
+    )
+    mock_el_match.is_checked = AsyncMock(return_value=False)
+    res_match = await filler.fill(mock_page, mock_el_match, "male")
+    assert res_match.success is True
+    assert res_match.action_type == "click"
+    assert res_match.observed_value == "male"
+    assert res_match.verification_status == "verified_match"
+    mock_el_match.click.assert_awaited_once()
+
+    # 2. Mismatched option value -> skipped, NOT clicked
+    mock_el_mismatch = AsyncMock()
+    mock_el_mismatch.click = AsyncMock()
+    mock_el_mismatch.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "radio", "value": "female"}.get(attr)
+    )
+    mock_el_mismatch.is_checked = AsyncMock(return_value=False)
+    res_mismatch = await filler.fill(mock_page, mock_el_mismatch, "male")
+    assert res_mismatch.success is True
+    assert res_mismatch.action_type == "skip_mismatched_option"
+    assert res_mismatch.observed_value == "female"
+    assert res_mismatch.verification_status == "unverified"
+    mock_el_mismatch.click.assert_not_called()
+
+    # 3. Matching by label text (e.g. value="M", text="男 (Male)")
+    mock_el_text = AsyncMock()
+    mock_el_text.click = AsyncMock()
+    mock_el_text.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "radio", "value": "M"}.get(attr)
+    )
+    mock_el_text.get_text = AsyncMock(return_value="男 (Male)")
+    mock_el_text.is_checked = AsyncMock(return_value=False)
+    res_text = await filler.fill(mock_page, mock_el_text, "男")
+    assert res_text.success is True
+    assert res_text.action_type == "click"
+    mock_el_text.click.assert_awaited_once()
+
+    # 4. Matching option that is already checked -> noop, NOT clicked
+    mock_el_already_checked = AsyncMock()
+    mock_el_already_checked.click = AsyncMock()
+    mock_el_already_checked.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "radio", "value": "male"}.get(attr)
+    )
+    mock_el_already_checked.is_checked = AsyncMock(return_value=True)
+    res_noop = await filler.fill(mock_page, mock_el_already_checked, "male")
+    assert res_noop.success is True
+    assert res_noop.action_type == "noop"
+    assert res_noop.verification_status == "verified_match"
+    mock_el_already_checked.click.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_checkbox_boolean_state_handling():
+    filler = RadioCheckboxFiller()
+    mock_page = AsyncMock()
+
+    # 1. Expected True & unchecked -> click
+    mock_el1 = AsyncMock()
+    mock_el1.click = AsyncMock()
+    mock_el1.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "checkbox"}.get(attr)
+    )
+    mock_el1.is_checked = AsyncMock(return_value=False)
+    res1 = await filler.fill(mock_page, mock_el1, True)
+    assert res1.success is True
+    assert res1.action_type == "click"
+    mock_el1.click.assert_awaited_once()
+
+    # 2. Expected True & already checked -> noop (not clicked)
+    mock_el2 = AsyncMock()
+    mock_el2.click = AsyncMock()
+    mock_el2.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "checkbox"}.get(attr)
+    )
+    mock_el2.is_checked = AsyncMock(return_value=True)
+    res2 = await filler.fill(mock_page, mock_el2, True)
+    assert res2.success is True
+    assert res2.action_type == "noop"
+    mock_el2.click.assert_not_called()
+
+    # 3. Expected False & checked -> click (to uncheck)
+    mock_el3 = AsyncMock()
+    mock_el3.click = AsyncMock()
+    mock_el3.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "checkbox"}.get(attr)
+    )
+    mock_el3.is_checked = AsyncMock(return_value=True)
+    res3 = await filler.fill(mock_page, mock_el3, False)
+    assert res3.success is True
+    assert res3.action_type == "click"
+    mock_el3.click.assert_awaited_once()
+
+    # 4. Expected False & unchecked -> noop (not clicked)
+    mock_el4 = AsyncMock()
+    mock_el4.click = AsyncMock()
+    mock_el4.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "checkbox"}.get(attr)
+    )
+    mock_el4.is_checked = AsyncMock(return_value=False)
+    res4 = await filler.fill(mock_page, mock_el4, False)
+    assert res4.success is True
+    assert res4.action_type == "noop"
+    mock_el4.click.assert_not_called()
+
+    # 5. TriState support (TriState.YES unchecked -> click, TriState.NO unchecked -> noop)
+    mock_el5 = AsyncMock()
+    mock_el5.click = AsyncMock()
+    mock_el5.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "checkbox"}.get(attr)
+    )
+    mock_el5.is_checked = AsyncMock(return_value=False)
+    res5 = await filler.fill(mock_page, mock_el5, TriState.YES)
+    assert res5.success is True
+    assert res5.action_type == "click"
+    mock_el5.click.assert_awaited_once()
+
+    mock_el6 = AsyncMock()
+    mock_el6.click = AsyncMock()
+    mock_el6.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "checkbox"}.get(attr)
+    )
+    mock_el6.is_checked = AsyncMock(return_value=False)
+    res6 = await filler.fill(mock_page, mock_el6, TriState.NO)
+    assert res6.success is True
+    assert res6.action_type == "noop"
+    mock_el6.click.assert_not_called()
+
+    # 6. Fallback to get_attribute("checked") when is_checked is not present
+    mock_el7 = AsyncMock(spec=["click", "get_attribute"])
+    mock_el7.click = AsyncMock()
+    mock_el7.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "checkbox", "checked": "checked"}.get(attr)
+    )
+    res7 = await filler.fill(mock_page, mock_el7, True)
+    assert res7.success is True
+    assert res7.action_type == "noop"
+    mock_el7.click.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_checkbox_choice_matching():
+    filler = RadioCheckboxFiller()
+    mock_page = AsyncMock()
+
+    # Checkbox with choice option value matching target in list
+    mock_el = AsyncMock()
+    mock_el.click = AsyncMock()
+    mock_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "checkbox", "value": "python"}.get(attr)
+    )
+    mock_el.is_checked = AsyncMock(return_value=False)
+
+    res = await filler.fill(mock_page, mock_el, ["python", "golang"])
+    assert res.success is True
+    assert res.action_type == "click"
+    mock_el.click.assert_awaited_once()
+
+    # Checkbox with choice option value NOT matching target in list
+    mock_el_mismatch = AsyncMock()
+    mock_el_mismatch.click = AsyncMock()
+    mock_el_mismatch.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "checkbox", "value": "rust"}.get(attr)
+    )
+    mock_el_mismatch.is_checked = AsyncMock(return_value=False)
+
+    res_mis = await filler.fill(mock_page, mock_el_mismatch, ["python", "golang"])
+    assert res_mis.success is True
+    assert res_mis.action_type == "skip_mismatched_option"
+    mock_el_mismatch.click.assert_not_called()
 
 
 # =============================================================================
