@@ -101,12 +101,13 @@ def test_pdf_extractor_extracts_and_normalizes_text(tmp_path: Path):
     mock_page_2.extract_text.return_value = "项目经历:   RAG 问答引擎   \n\n"
 
     mock_reader = MagicMock()
+    mock_reader.is_encrypted = False
     mock_reader.pages = [mock_page_1, mock_page_2]
 
     extractor = PdfExtractor()
     with patch("pypdf.PdfReader", return_value=mock_reader) as mock_pdf_reader:
         result = extractor.extract_text(pdf_file)
-        mock_pdf_reader.assert_called_once_with(str(pdf_file))
+        assert mock_pdf_reader.call_count == 1
         assert "李四" in result
         assert "清华大学 计算机科学与技术" in result
         assert "项目经历: RAG 问答引擎" in result
@@ -145,10 +146,50 @@ def test_pdf_extractor_empty_pages_handling(tmp_path: Path):
     mock_page_2.extract_text.return_value = None
 
     mock_reader = MagicMock()
+    mock_reader.is_encrypted = False
     mock_reader.pages = [mock_page_1, mock_page_2]
 
     extractor = PdfExtractor()
     with patch("pypdf.PdfReader", return_value=mock_reader):
         result = extractor.extract_text(pdf_file)
         assert result == ""
+
+
+def test_tex_extractor_residual_grouping_braces(tmp_path: Path):
+    tex_file = tmp_path / "grouping.tex"
+    tex_content = r"{\Large 张三} {\small 软件工程师}"
+    tex_file.write_text(tex_content, encoding="utf-8")
+
+    extractor = TexExtractor()
+    cleaned = extractor.extract_text(tex_file)
+
+    assert "{" not in cleaned
+    assert "}" not in cleaned
+    assert "张三 软件工程师" in cleaned
+
+
+def test_pdf_extractor_encrypted_raises_value_error(tmp_path: Path):
+    pdf_file = tmp_path / "protected.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 dummy")
+
+    mock_reader = MagicMock()
+    mock_reader.is_encrypted = True
+
+    extractor = PdfExtractor()
+    with patch("pypdf.PdfReader", return_value=mock_reader):
+        with pytest.raises(ValueError, match="Cannot read password-protected PDF"):
+            extractor.extract_text(pdf_file)
+
+
+def test_pdf_extractor_corrupted_raises_value_error(tmp_path: Path):
+    import pypdf.errors
+
+    pdf_file = tmp_path / "corrupted.pdf"
+    pdf_file.write_bytes(b"not a valid pdf content")
+
+    extractor = PdfExtractor()
+    with patch("pypdf.PdfReader", side_effect=pypdf.errors.PdfReadError("EOF marker not found")):
+        with pytest.raises(ValueError, match="Invalid or corrupted PDF document"):
+            extractor.extract_text(pdf_file)
+
 

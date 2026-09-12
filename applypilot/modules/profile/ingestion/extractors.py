@@ -32,18 +32,27 @@ class PdfExtractor:
 
         Raises:
             FileNotFoundError: If the target PDF file does not exist.
+            ValueError: If the PDF document is encrypted or corrupted.
         """
         path = Path(file_path)
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(f"PDF file not found at: {path}")
 
-        reader = pypdf.PdfReader(str(path))
         pages_text: list[str] = []
-
-        for page in reader.pages:
-            extracted = page.extract_text()
-            if extracted:
-                pages_text.append(extracted)
+        with open(path, "rb") as f:
+            try:
+                reader = pypdf.PdfReader(f)
+                if reader.is_encrypted:
+                    raise ValueError(f"Cannot read password-protected PDF: {path}")
+                for page in reader.pages:
+                    try:
+                        extracted = page.extract_text()
+                        if extracted:
+                            pages_text.append(extracted)
+                    except Exception:
+                        continue
+            except pypdf.errors.PdfReadError as e:
+                raise ValueError(f"Invalid or corrupted PDF document: {path}") from e
 
         raw_text = "\n\n".join(pages_text)
         return self._normalize_whitespace(raw_text)
@@ -102,10 +111,9 @@ class TexExtractor:
 
         # 3. Strip preambles, packages, and metadata commands completely
         text = re.sub(
-            r"\\(?:documentclass|usepackage|geometry|hypersetup|pagestyle|thispagestyle|setlength|titlespacing\*?|titleformat\*?)(?:\[.*?\])?\{.*?\}(?:\{.*?\})?",
+            r"\\(?:documentclass|usepackage|geometry|hypersetup|pagestyle|thispagestyle|setlength|titlespacing\*?|titleformat\*?)(?:\[[^\[\]]*\])?\{[^{}]*\}(?:\{[^{}]*\})?",
             "",
             text,
-            flags=re.DOTALL,
         )
 
         # 4. Unwrap environment tags
@@ -143,12 +151,13 @@ class TexExtractor:
             text,
         )
 
-        # 9. Clean up residual backslash commands like \{ and \}
-        text = text.replace(r"\{", "{").replace(r"\}", "}")
-        # Clean any remaining loose backslash commands like \relax, \null
+        # 9. Clean up residual backslash commands like \relax, \null, \Large
         text = re.sub(r"\\[a-zA-Z]+\b", "", text)
 
-        # 10. Normalize whitespace
+        # 10. Strip residual grouping braces like in {\Large 张三}
+        text = text.replace("{", "").replace("}", "")
+
+        # 11. Normalize whitespace
         lines = []
         for line in text.splitlines():
             cleaned_line = re.sub(r"[ \t]+", " ", line).strip()
@@ -158,3 +167,4 @@ class TexExtractor:
         joined = "\n".join(lines)
         collapsed = re.sub(r"\n{3,}", "\n\n", joined)
         return collapsed.strip()
+
