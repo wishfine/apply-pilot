@@ -229,6 +229,14 @@ class FieldMapper:
         # -----------------------------------------------------------------
         # Tier 3: Semantic / Keyword Heuristics
         # -----------------------------------------------------------------
+        # Resume attachment heuristics
+        if "简历" in clean_key or "resume" in clean_key or "cv" in clean_key:
+            return FieldMappingResult(
+                profile_path="assets[asset_resume_pdf].file_path",
+                method="semantic",
+                confidence=0.85,
+            )
+
         # Name heuristics
         if ("姓名" in clean_key or "名字" in clean_key) and "紧急" not in clean_key:
             if "英文" in clean_key or "english" in clean_key:

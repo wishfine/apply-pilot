@@ -69,7 +69,7 @@ class FileUploadFiller:
             path_str = str(raw_val) if raw_val is not None else ""
 
         path_obj = Path(path_str).expanduser() if path_str else Path("")
-        if not path_str or not path_obj.exists():
+        if not path_str or not path_obj.is_file():
             return FillResult(
                 success=False,
                 action_type="set_files",
@@ -221,19 +221,23 @@ def _option_matches(candidate: Optional[str], target: Any) -> bool:
         ValueNormalizerRegistry,
     )
 
-    # 1. Plain text semantic equivalence
-    if ValueNormalizerRegistry.are_equivalent(ValueKind.PLAIN_TEXT, cand_str, target_val):
-        return True
+    # 1. Semantic equivalence across option-relevant ValueKinds
+    for kind in (
+        ValueKind.PLAIN_TEXT,
+        ValueKind.EDUCATION_LEVEL,
+        ValueKind.BOOLEAN,
+        ValueKind.ENUM,
+        ValueKind.POLITICAL_STATUS,
+        ValueKind.ACADEMIC_DEGREE,
+        ValueKind.CITY,
+    ):
+        try:
+            if ValueNormalizerRegistry.are_equivalent(kind, cand_str, target_val):
+                return True
+        except Exception:
+            pass
 
-    # 2. Boolean equivalence if applicable
-    if ValueNormalizerRegistry.are_equivalent(ValueKind.BOOLEAN, cand_str, target_val):
-        return True
-
-    # 3. Enum equivalence if applicable
-    if ValueNormalizerRegistry.are_equivalent(ValueKind.ENUM, cand_str, target_val):
-        return True
-
-    # 4. Direct case-insensitive equality or discrete token match
+    # 2. Direct case-insensitive equality or discrete token match
     c_lower = cand_str.lower()
     t_lower = target_str.lower()
     if c_lower == t_lower:
@@ -241,6 +245,11 @@ def _option_matches(candidate: Optional[str], target: Any) -> bool:
     parts = [p.strip() for p in re.split(r"[\s/()（）\-_]+", c_lower) if p.strip()]
     if t_lower in parts:
         return True
+
+    # 3. Chinese text containment (e.g. "硕士研究生" contains "硕士")
+    if re.search(r"[\u4e00-\u9fff]", cand_str) and re.search(r"[\u4e00-\u9fff]", target_str):
+        if len(target_str) >= 2 and (target_str in cand_str or cand_str in target_str):
+            return True
 
     return False
 
@@ -281,6 +290,8 @@ class RadioCheckboxFiller:
 
         elem_val = await _get_attr(element, "value")
         elem_text = await _get_element_text(element)
+        if not elem_text and field_info:
+            elem_text = str(field_info.get("label") or "").strip()
         is_checked = await _is_element_checked(element)
 
         from applypilot.modules.apply.normalizer import normalize_boolean

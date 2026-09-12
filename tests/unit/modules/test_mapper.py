@@ -305,6 +305,21 @@ def test_semantic_name_gender_and_dates():
     assert FieldMapper.map_field("s4", "预计毕业时间").profile_path == "education[__HIGHEST__].end_date"
 
 
+def test_semantic_resume_upload_heuristics():
+    test_labels = [
+        "请上传您的个人简历",
+        "上传中英文简历",
+        "附件简历 (PDF)",
+        "Please upload your resume",
+        "Attach CV",
+    ]
+    for label in test_labels:
+        res = FieldMapper.map_field("sig_resume", label)
+        assert res.profile_path == "assets[asset_resume_pdf].file_path"
+        assert res.method == "semantic"
+        assert res.confidence == 0.85
+
+
 def test_disabled_correction_memory_ignored():
     disabled_memory = [
         {

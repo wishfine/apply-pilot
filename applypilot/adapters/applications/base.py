@@ -74,7 +74,10 @@ class BaseApplicationAdapter:
 
             if can_handle:
                 try:
-                    return await filler.fill(page, element, value)
+                    try:
+                        return await filler.fill(page, element, value, field_info=field_info)
+                    except TypeError:
+                        return await filler.fill(page, element, value)
                 except Exception:
                     return FillResult(
                         success=False,

@@ -135,6 +135,22 @@ async def test_file_upload_filler_expanduser(tmp_path: Path, monkeypatch: pytest
     mock_el.set_files.assert_awaited_with([str(test_file)])
 
 
+@pytest.mark.asyncio
+async def test_file_upload_filler_directory_rejected(tmp_path: Path):
+    sub_dir = tmp_path / "somedir"
+    sub_dir.mkdir()
+
+    filler = FileUploadFiller()
+    mock_el = AsyncMock()
+    mock_el.set_files = AsyncMock()
+    mock_page = AsyncMock()
+
+    res = await filler.fill(mock_page, mock_el, str(sub_dir))
+    assert res.success is False
+    assert res.error_code == "FILE_NOT_FOUND"
+    mock_el.set_files.assert_not_called()
+
+
 # =============================================================================
 # 2. NativeSelectFiller Tests
 # =============================================================================
@@ -285,6 +301,54 @@ async def test_radio_button_option_matching():
     assert res_noop.action_type == "noop"
     assert res_noop.verification_status == "verified_match"
     mock_el_already_checked.click.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_radio_filler_uses_field_info_label():
+    filler = RadioCheckboxFiller()
+    mock_page = AsyncMock()
+
+    # <input type="radio" value="opt_1"> without inner text, but field_info has label="硕士研究生"
+    mock_el = AsyncMock()
+    mock_el.click = AsyncMock()
+    mock_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "radio", "value": "opt_1"}.get(attr)
+    )
+    mock_el.get_text = AsyncMock(return_value="")  # No inner text on input
+    mock_el.is_checked = AsyncMock(return_value=False)
+
+    field_info = {
+        "field_type": "radio",
+        "type": "radio",
+        "label": "硕士研究生",
+    }
+    res = await filler.fill(mock_page, mock_el, "硕士", field_info=field_info)
+    assert res.success is True
+    assert res.action_type == "click"
+    mock_el.click.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_base_adapter_forwards_field_info_to_filler():
+    adapter = GenericApplicationAdapter()
+    mock_page = AsyncMock()
+    mock_el = AsyncMock()
+    mock_el.click = AsyncMock()
+    mock_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "radio", "value": "opt_A"}.get(attr)
+    )
+    mock_el.get_text = AsyncMock(return_value="")
+    mock_el.is_checked = AsyncMock(return_value=False)
+
+    field_info = {
+        "field_type": "radio",
+        "type": "radio",
+        "label": "北京大学",
+    }
+    res = await adapter.fill_field(mock_page, mock_el, field_info, "北京大学")
+    assert res.success is True
+    assert res.action_type == "click"
+    mock_el.click.assert_awaited_once()
 
 
 @pytest.mark.asyncio
