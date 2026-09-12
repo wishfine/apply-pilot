@@ -42,6 +42,13 @@ class ResumeIngestionService:
         self.model = model or os.getenv("APPLYPILOT_LLM_MODEL") or "gpt-4o-mini"
         self.timeout = timeout
 
+    def __repr__(self) -> str:
+        key_repr = "***" if self.api_key else "None"
+        return (
+            f"ResumeIngestionService(api_key='{key_repr}', base_url='{self.base_url}', "
+            f"model='{self.model}', timeout={self.timeout})"
+        )
+
     async def parse_file(self, file_path: Union[Path, str]) -> CandidateProfile:
         """Extract text from resume file (.pdf or .tex) and transform into CandidateProfile.
 
@@ -82,8 +89,13 @@ class ResumeIngestionService:
             Validated CandidateProfile instance.
 
         Raises:
-            ResumeIngestionError: If API key is missing, network fails, or validation fails.
+            ResumeIngestionError: If text is empty, API key is missing, network fails, or validation fails.
         """
+        if not text or not text.strip():
+            raise ResumeIngestionError(
+                "Extracted resume text is empty. Scanned image-based PDFs without OCR are not supported."
+            )
+
         if not self.api_key:
             raise ResumeIngestionError(
                 "No API key provided for resume ingestion. Set APPLYPILOT_LLM_API_KEY or OPENAI_API_KEY."
@@ -138,11 +150,12 @@ class ResumeIngestionService:
             f'  "experiences": [\n'
             f'    {{\n'
             f'      "id": "exp_1",\n'
-            f'      "company_name": "...",\n'
-            f'      "job_title": "...",\n'
+            f'      "org_name": "...",\n'
+            f'      "title": "...",\n'
             f'      "experience_type": "internship" | "full_time" | "research" | "student_org" | "volunteer",\n'
             f'      "start_date": "YYYY-MM",\n'
-            f'      "end_date": "YYYY-MM"\n'
+            f'      "end_date": "YYYY-MM",\n'
+            f'      "description_bullets": ["..."]\n'
             f'    }}\n'
             f'  ],\n'
             f'  "projects": [\n'
@@ -150,12 +163,15 @@ class ResumeIngestionService:
             f'      "id": "proj_1",\n'
             f'      "project_name": "...",\n'
             f'      "role": "...",\n'
+            f'      "summary": "Brief summary of the project",\n'
             f'      "start_date": "YYYY-MM",\n'
-            f'      "end_date": "YYYY-MM"\n'
+            f'      "end_date": "YYYY-MM",\n'
+            f'      "description_bullets": ["..."]\n'
             f'    }}\n'
             f'  ],\n'
             f'  "skills": [\n'
             f'    {{\n'
+            f'      "skill_id": "skill_1",\n'
             f'      "category": "technical",\n'
             f'      "name": "..."\n'
             f'    }}\n'
@@ -205,8 +221,7 @@ class ResumeIngestionService:
         if not isinstance(profile_dict, dict):
             raise ResumeIngestionError("Parsed LLM output is not a JSON dictionary.")
 
-        if not profile_dict.get("profile_id"):
-            profile_dict["profile_id"] = "cand_profile"
+        profile_dict = self._normalize_profile_dict(profile_dict)
 
         try:
             return CandidateProfile.model_validate(profile_dict)
@@ -214,14 +229,49 @@ class ResumeIngestionService:
             raise ResumeIngestionError(f"Profile validation failed: {e}") from e
 
     @staticmethod
+    def _normalize_profile_dict(profile_dict: dict) -> dict:
+        """Defensively normalize common LLM key discrepancies before domain validation."""
+        if not profile_dict.get("profile_id"):
+            profile_dict["profile_id"] = "cand_profile"
+
+        for idx, exp in enumerate(profile_dict.get("experiences", [])):
+            if not isinstance(exp, dict):
+                continue
+            if "id" not in exp or not exp["id"]:
+                exp["id"] = f"exp_{idx + 1}"
+            if "company_name" in exp and "org_name" not in exp:
+                exp["org_name"] = exp.pop("company_name")
+            if "job_title" in exp and "title" not in exp:
+                exp["title"] = exp.pop("job_title")
+
+        for idx, proj in enumerate(profile_dict.get("projects", [])):
+            if not isinstance(proj, dict):
+                continue
+            if "id" not in proj or not proj["id"]:
+                proj["id"] = f"proj_{idx + 1}"
+            if "summary" not in proj or not proj["summary"]:
+                proj["summary"] = proj.get("project_name", "Project summary")
+
+        for idx, skill in enumerate(profile_dict.get("skills", [])):
+            if not isinstance(skill, dict):
+                continue
+            if "skill_id" not in skill or not skill["skill_id"]:
+                skill["skill_id"] = skill.pop("id", None) or f"skill_{idx + 1}"
+
+        for idx, edu in enumerate(profile_dict.get("education", [])):
+            if not isinstance(edu, dict):
+                continue
+            if "id" not in edu or not edu["id"]:
+                edu["id"] = f"edu_{idx + 1}"
+
+        return profile_dict
+
+    @staticmethod
     def _clean_markdown_json(raw_text: str) -> str:
-        """Strip markdown code fence wrapper if present."""
+        """Strip markdown code fence wrapper and extract outermost JSON object."""
         text = raw_text.strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            if lines and lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            text = "\n".join(lines).strip()
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return text[start : end + 1]
         return text

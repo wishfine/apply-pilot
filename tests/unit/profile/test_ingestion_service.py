@@ -59,10 +59,57 @@ def sample_profile_dict() -> dict:
                 "end_date": "2023-06",
             }
         ],
-        "experiences": [],
-        "projects": [],
-        "skills": [],
+        "experiences": [
+            {
+                "id": "exp_1",
+                "org_name": "阿里巴巴",
+                "title": "算法工程师实习生",
+                "experience_type": "internship",
+                "start_date": "2024-06",
+                "end_date": "2024-12",
+                "description_bullets": ["负责大模型 RAG 系统开发与优化"],
+            }
+        ],
+        "projects": [
+            {
+                "id": "proj_1",
+                "project_name": "智能问答系统",
+                "role": "核心开发者",
+                "summary": "基于 LangChain 的招聘问答系统",
+                "start_date": "2023-10",
+                "end_date": "2024-05",
+            }
+        ],
+        "skills": [
+            {
+                "skill_id": "skill_1",
+                "name": "Python",
+                "category": "programming",
+            }
+        ],
     }
+
+
+def test_service_repr_masks_api_key():
+    svc_with_key = ResumeIngestionService(api_key="sk-secret-123456789")
+    r1 = repr(svc_with_key)
+    assert "sk-secret-123456789" not in r1
+    assert "api_key='***'" in r1
+
+    svc_no_key = ResumeIngestionService(api_key="")
+    r2 = repr(svc_no_key)
+    assert "api_key='None'" in r2
+
+
+@pytest.mark.asyncio
+async def test_parse_text_empty_or_whitespace_raises_error():
+    service = ResumeIngestionService(api_key="test_api_key")
+
+    with pytest.raises(ResumeIngestionError, match="Extracted resume text is empty"):
+        await service.parse_text("")
+
+    with pytest.raises(ResumeIngestionError, match="Extracted resume text is empty"):
+        await service.parse_text("   \n\t  \n ")
 
 
 @pytest.mark.asyncio
@@ -80,6 +127,12 @@ async def test_parse_text_success(sample_profile_dict):
         assert profile.contact.email == "zhangsan@example.com"
         assert len(profile.education) == 1
         assert profile.education[0].school_name == "清华大学"
+        assert len(profile.experiences) == 1
+        assert profile.experiences[0].org_name == "阿里巴巴"
+        assert len(profile.projects) == 1
+        assert profile.projects[0].project_name == "智能问答系统"
+        assert len(profile.skills) == 1
+        assert profile.skills[0].name == "Python"
 
 
 @pytest.mark.asyncio
@@ -108,6 +161,94 @@ async def test_parse_text_markdown_json_cleaning(sample_profile_dict):
         mock_post.return_value = mock_resp
         profile = await service.parse_text("简历文本")
         assert profile.identity.name == "张三"
+
+
+@pytest.mark.asyncio
+async def test_parse_text_preamble_postamble_wrapped_json(sample_profile_dict):
+    service = ResumeIngestionService(api_key="test_api_key")
+
+    conversational_content = (
+        "Here is the parsed JSON profile for the candidate:\n"
+        f"{json.dumps(sample_profile_dict, ensure_ascii=False)}\n"
+        "Please let me know if you need further adjustments!"
+    )
+    raw_api_response = {
+        "id": "chatcmpl-test",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": conversational_content,
+                }
+            }
+        ],
+    }
+    mock_resp = httpx.Response(
+        status_code=200,
+        content=json.dumps(raw_api_response).encode("utf-8"),
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_resp
+        profile = await service.parse_text("简历文本")
+        assert profile.identity.name == "张三"
+        assert profile.experiences[0].org_name == "阿里巴巴"
+
+
+@pytest.mark.asyncio
+async def test_parse_text_defensive_normalization():
+    service = ResumeIngestionService(api_key="test_api_key")
+
+    # LLM output with common discrepancies:
+    # - company_name instead of org_name
+    # - job_title instead of title
+    # - missing id in experiences and projects
+    # - missing summary in projects
+    # - id instead of skill_id in skills
+    raw_discrepant_data = {
+        "identity": {"name": "李四"},
+        "experiences": [
+            {
+                "company_name": "腾讯",
+                "job_title": "后端开发工程师",
+                "experience_type": "full_time",
+                "start_date": "2023-07",
+            }
+        ],
+        "projects": [
+            {
+                "project_name": "分布式存储系统",
+                "role": "主程",
+                "start_date": "2022-09",
+            }
+        ],
+        "skills": [
+            {
+                "id": "skill_go",
+                "name": "Golang",
+                "category": "programming",
+            }
+        ],
+    }
+
+    mock_resp = _mock_llm_response(raw_discrepant_data)
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_resp
+        profile = await service.parse_text("李四的简历")
+
+        assert profile.profile_id == "cand_profile"
+        assert profile.identity.name == "李四"
+        assert len(profile.experiences) == 1
+        assert profile.experiences[0].id == "exp_1"
+        assert profile.experiences[0].org_name == "腾讯"
+        assert profile.experiences[0].title == "后端开发工程师"
+        assert len(profile.projects) == 1
+        assert profile.projects[0].id == "proj_1"
+        assert profile.projects[0].summary == "分布式存储系统"
+        assert len(profile.skills) == 1
+        assert profile.skills[0].skill_id == "skill_go"
+        assert profile.skills[0].name == "Golang"
 
 
 @pytest.mark.asyncio
