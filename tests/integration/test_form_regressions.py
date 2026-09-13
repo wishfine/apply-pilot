@@ -10,6 +10,8 @@ from playwright.async_api import async_playwright, Error
 
 from applypilot.browser.base import InteractionPolicy
 from applypilot.browser.playwright_backend import PlaywrightPage
+from applypilot.adapters.applications.generic import GenericApplicationAdapter
+from applypilot.adapters.applications.moka import MokaSearchSelectFiller
 from applypilot.domain.job import ApplicationTarget, ApplicationStatus, Job
 from applypilot.domain.profile import CandidateProfile
 from applypilot.domain.variant import DisclosurePolicy
@@ -80,6 +82,37 @@ async def test_native_select_uses_selection(form):
     status, _ = await run({'identity': {'gender': 'male'}})
     assert await page.locator('select').input_value() == 'male'
     assert status == ApplicationStatus.READY_REVIEW
+
+
+@pytest.mark.asyncio
+async def test_iframe_hosted_form_is_scanned_and_filled(form):
+    page, run, _ = form
+    await page.set_content('<iframe id="form-frame"></iframe>')
+    frame = page.frames[-1]
+    await frame.set_content('<input aria-label="姓名" required><button>提交申请</button>')
+    status, _ = await run({'identity': {'name': '测试甲'}})
+    assert await frame.locator('input').input_value() == '测试甲'
+    assert status == ApplicationStatus.READY_REVIEW
+
+
+@pytest.mark.asyncio
+async def test_login_help_text_without_auth_controls_is_not_login_page(form):
+    page, _, _ = form
+    await page.set_content('<p>请先登录后查看帮助文档</p><input aria-label="姓名">')
+    adapter = GenericApplicationAdapter()
+    wrapped = PlaywrightPage(page, InteractionPolicy(action_timeout_ms=500, min_action_interval_ms=0))
+    assert await adapter.is_login_page(wrapped) is False
+
+
+@pytest.mark.asyncio
+async def test_moka_picker_does_not_click_unrelated_global_list_item(form):
+    page, _, _ = form
+    await page.set_content('<input aria-label="学校"><ul><li>清华大学</li></ul>')
+    wrapped = PlaywrightPage(page, InteractionPolicy(action_timeout_ms=500, min_action_interval_ms=0))
+    element = await wrapped.find('input')
+    result = await MokaSearchSelectFiller().fill(wrapped, element, '清华大学')
+    assert result.success is False
+    assert result.needs_human is True
 
 
 @pytest.mark.asyncio

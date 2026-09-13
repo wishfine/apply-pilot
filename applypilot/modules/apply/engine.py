@@ -18,12 +18,12 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-from applypilot.adapters.applications.base import ApplicationAdapter
+from applypilot.adapters.applications.base import ApplicationAdapter, FillResult
 from applypilot.adapters.applications.beisen import BeisenApplicationAdapter
 from applypilot.adapters.applications.generic import GenericApplicationAdapter
 from applypilot.adapters.applications.moka import MokaApplicationAdapter
 from applypilot.adapters.detection import PlatformDetector
-from applypilot.core.privacy import AuditSanitizer, get_local_audit_secret
+from applypilot.core.privacy import AuditSanitizer, get_local_audit_secret, redact_url
 from applypilot.domain.base import FieldPolicy, LogStrategy, SensitivityLevel
 from applypilot.domain.job import ApplicationStatus, ApplicationTarget
 from applypilot.domain.profile import CandidateProfile
@@ -333,17 +333,10 @@ class ApplyEngine:
             except Exception:
                 elements = []
             if elements:
-                active_found = False
-                for element in elements:
-                    try:
-                        state = await self._live_field(element)
-                        if state is None or state.get("is_active") is not False:
-                            active_found = True
-                            break
-                    except Exception:
-                        continue
-                if active_found:
-                    return elements
+                # Return the locators immediately and let the main scan record
+                # inspection failures.  Filtering failed inspections here can
+                # make a broken driver look like an empty, ready page.
+                return elements
             if attempt + 1 < attempts:
                 await asyncio.sleep(0.15)
         return []
@@ -544,14 +537,51 @@ class ApplyEngine:
                 tenant_hint=tenant_hint,
             )
 
+            async def _refresh_after_user_handoff() -> None:
+                """Adopt popup/redirect pages and re-detect an unknown platform."""
+                nonlocal page, target_url, current_platform, adapter, corrections
+                current_page_fn = getattr(self.browser, "current_page", None)
+                if callable(current_page_fn):
+                    try:
+                        candidate = await current_page_fn()
+                        # An unconfigured AsyncMock is not a browser page.
+                        if candidate is not None and not type(candidate).__module__.startswith("unittest.mock"):
+                            page = candidate
+                    except Exception:
+                        logger.debug("Unable to refresh browser page after handoff", exc_info=True)
+                if callable(getattr(type(page), "url", None)):
+                    try:
+                        actual_url = await page.url()
+                        if actual_url and actual_url != "about:blank":
+                            target_url = actual_url
+                    except Exception:
+                        pass
+                if not target.provider and page and hasattr(page, "execute_unsafe_script"):
+                    try:
+                        report = await self.detector.detect(page)
+                        best_plat = report.candidates[0].platform if report and report.candidates else "generic"
+                        adapter = self.adapters.get(best_plat, self.adapters.get("generic")) or adapter
+                        current_platform = best_plat
+                        if run_created:
+                            await self.app_repo.update_run_adapter(run_id, current_platform)
+                        parsed_url = urlparse(target_url)
+                        corrections = await self.corr_repo.lookup_corrections(
+                            platform=current_platform,
+                            tenant_hint=parsed_url.netloc.lower() or None,
+                        )
+                    except Exception:
+                        logger.debug("Platform re-detection after handoff failed", exc_info=True)
+
             # -----------------------------------------------------------------
-            # d. Multi-Stage Filling Loop (max 10 iterations)
+            # d. Multi-Stage Filling Loop (max 10 actual stage transitions)
             # -----------------------------------------------------------------
             completed_normally = False
             structure_rescan_attempts: dict[str, int] = {}
             login_retry_attempts = 0
             unrecognized_retry_attempts = 0
-            for step in range(10):
+            stage_transitions = 0
+            max_stage_transitions = 10
+            while stage_transitions < max_stage_transitions:
                 current_stage = (
                     await adapter.detect_stage(page)
                     if hasattr(adapter, "detect_stage")
@@ -565,12 +595,13 @@ class ApplyEngine:
                     actual_url = await page.url()
                     if actual_url and actual_url != "about:blank":
                         target_url = actual_url
+                audit_url = redact_url(target_url)
 
                 snap_id = f"snap_{uuid.uuid4().hex[:12]}"
                 await self.snap_repo.save_snapshot(
                     snapshot_id=snap_id,
                     run_id=run_id,
-                    page_url=target_url,
+                    page_url=audit_url,
                     dom_fingerprint="fp",
                     fields_meta_json=[],
                     stage_key=current_stage,
@@ -582,7 +613,7 @@ class ApplyEngine:
                         event_id=f"evt_{uuid.uuid4().hex[:12]}",
                         run_id=run_id,
                         event_type="LOGIN_REQUIRED",
-                        payload_json={"stage": current_stage, "page_url": target_url},
+                        payload_json={"stage": current_stage, "page_url": audit_url},
                     )
                     if (
                         self.interactive_readiness
@@ -593,6 +624,7 @@ class ApplyEngine:
                         await self.browser.wait_for_user(
                             "检测到登录或验证页面。请在浏览器中完成登录、短信验证或授权，页面进入网申表单后回到终端按回车继续"
                         )
+                        await _refresh_after_user_handoff()
                         continue
                     return await self._pause_application(
                         app_id, run_id, target_url, "login_required", snap_id
@@ -600,6 +632,8 @@ class ApplyEngine:
 
                 stage_scanned_fields: list[dict[str, Any]] = []
                 scanned_elements: list[Any] = []
+                inspection_failed = False
+                hard_inspection_failed = False
 
                 if hasattr(page, "find_all"):
                     elements = await self._wait_for_form_elements(
@@ -823,13 +857,25 @@ class ApplyEngine:
                                             },
                                             expected,
                                         )
-                                        action_type = str(getattr(res, "action_type", "type_text"))
-                                        status_str = "success" if getattr(res, "success", True) else "failed"
-                                        fill_failed = not getattr(res, "success", True)
+                                        if not isinstance(res, FillResult):
+                                            # A filler must return the structured
+                                            # contract.  Missing/duck-typed
+                                            # results are failures so a broken
+                                            # adapter can never produce READY_REVIEW.
+                                            res = FillResult(
+                                                success=False,
+                                                action_type="invalid_result",
+                                                error_code="INVALID_FILL_RESULT",
+                                                verification_status="conflict",
+                                                recoverable=False,
+                                            )
+                                        action_type = res.action_type
+                                        status_str = "success" if res.success else "failed"
+                                        fill_failed = not res.success
                                         option_unmatched = action_type == "skip_mismatched_option"
                                         after_fill = await self._live_field(element)
                                         obs_raw = (after_fill["observed_value"] if after_fill is not None
-                                                   else getattr(res, "observed_value", None))
+                                                   else res.observed_value)
                                         sensitive = any(key in path for key in ("id_number", "political", "family", "secret"))
                                         field_policy = FieldPolicy(
                                             path_pattern=path,
@@ -838,11 +884,7 @@ class ApplyEngine:
                                         )
                                         obs_val = AuditSanitizer.mask_value(field_policy, obs_raw)
                                         secret = get_local_audit_secret()
-                                        err_code = (
-                                            str(res.error_code)
-                                            if getattr(res, "error_code", None) is not None
-                                            else None
-                                        )
+                                        err_code = str(res.error_code) if res.error_code is not None else None
                                         await self.snap_repo.save_field_action(
                                             action_id=f"act_{uuid.uuid4().hex[:12]}",
                                             run_id=run_id,
@@ -859,9 +901,9 @@ class ApplyEngine:
                                         )
                                         if after_fill is not None:
                                             observed = after_fill["observed_value"]
-                                        elif getattr(res, "observed_value", None) is not None:
+                                        elif res.observed_value is not None:
                                             observed = res.observed_value
-                                        elif getattr(res, "success", True):
+                                        elif res.success:
                                             observed = expected
 
                             scanned_elements.append(element)
@@ -898,12 +940,26 @@ class ApplyEngine:
                                 ),
                             })
                         except Exception as e:
+                            inspection_failed = True
+                            if "detached" not in str(e).lower():
+                                hard_inspection_failed = True
                             logger.warning(
                                 "Failed to inspect or process form element on stage '%s': %s",
                                 current_stage,
                                 e,
                             )
                             continue
+
+                if hard_inspection_failed or (inspection_failed and not stage_scanned_fields):
+                    await self.event_repo.append_event(
+                        event_id=f"evt_{uuid.uuid4().hex[:12]}",
+                        run_id=run_id,
+                        event_type="FORM_FIELD_INSPECTION_FAILED",
+                        payload_json={"stage": current_stage, "page_url": audit_url},
+                    )
+                    return await self._pause_application(
+                        app_id, run_id, target_url, current_stage, snap_id
+                    )
 
                 # Persist the actual post-scan metadata and fingerprint rather
                 # than the old placeholder snapshot created before inspection.
@@ -931,7 +987,7 @@ class ApplyEngine:
                             event_id=f"evt_{uuid.uuid4().hex[:12]}",
                             run_id=run_id,
                             event_type="FORM_STRUCTURE_UNSTABLE",
-                            payload_json={"stage": current_stage, "page_url": target_url},
+                            payload_json={"stage": current_stage, "page_url": audit_url},
                         )
                         return await self._pause_application(
                             app_id, run_id, target_url, current_stage, snap_id
@@ -946,7 +1002,7 @@ class ApplyEngine:
                             event_id=f"evt_{uuid.uuid4().hex[:12]}",
                             run_id=run_id,
                             event_type="LOGIN_REQUIRED",
-                            payload_json={"stage": current_stage, "page_url": target_url},
+                            payload_json={"stage": current_stage, "page_url": audit_url},
                         )
                         if (
                             self.interactive_readiness
@@ -957,6 +1013,7 @@ class ApplyEngine:
                             await self.browser.wait_for_user(
                                 "检测到登录或验证页面。请在浏览器中完成登录、短信验证或授权，页面进入网申表单后回到终端按回车继续"
                             )
+                            await _refresh_after_user_handoff()
                             continue
                         return await self._pause_application(
                             app_id, run_id, target_url, "login_required", snap_id
@@ -976,6 +1033,7 @@ class ApplyEngine:
                         adv_res = await adapter.advance(page, current_stage)
                         advanced = adv_res is True
                     if advanced:
+                        stage_transitions += 1
                         continue
 
                     if (
@@ -988,11 +1046,12 @@ class ApplyEngine:
                             event_id=f"evt_{uuid.uuid4().hex[:12]}",
                             run_id=run_id,
                             event_type="PAGE_RETRY_REQUESTED",
-                            payload_json={"stage": current_stage, "page_url": target_url},
+                            payload_json={"stage": current_stage, "page_url": audit_url},
                         )
                         await self.browser.wait_for_user(
                             "当前页面暂未识别到可填写控件。若页面正在登录、验证或加载，请在浏览器中完成操作，看到网申字段后回到终端按回车重新扫描"
                         )
+                        await _refresh_after_user_handoff()
                         continue
 
                     logger.warning("阶段 '%s' 未检测到有效表单控件或终审状态，暂停等待人工核查", current_stage)
@@ -1000,7 +1059,7 @@ class ApplyEngine:
                         event_id=f"evt_{uuid.uuid4().hex[:12]}",
                         run_id=run_id,
                         event_type="PAGE_UNRECOGNIZED",
-                        payload_json={"stage": current_stage, "page_url": target_url},
+                        payload_json={"stage": current_stage, "page_url": audit_url},
                     )
                     return await self._pause_application(
                         app_id, run_id, target_url, current_stage, snap_id
@@ -1089,9 +1148,10 @@ class ApplyEngine:
 
                 advanced = False
                 if hasattr(adapter, "advance"):
-                    advanced = await adapter.advance(page, current_stage)
+                    advanced = (await adapter.advance(page, current_stage)) is True
                 if not advanced:
                     return await self._pause_application(app_id, run_id, target_url, current_stage, snap_id)
+                stage_transitions += 1
 
             if not completed_normally:
                 await self.app_repo.update_run_status(

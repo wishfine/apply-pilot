@@ -7,7 +7,7 @@
 *One profile. Every application.*
 
 [![Python](https://img.shields.io/badge/Python-%3E%3D3.11-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/Tests-392%20Passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-407%20Passed-brightgreen.svg)](tests/)
 [![Architecture](https://img.shields.io/badge/Design-Local--first-orange.svg)](docs/superpowers/specs/2026-09-12-apply-pilot-v0.1-design.md)
 
 </div>
@@ -22,10 +22,10 @@ ApplyPilot 从本地候选人档案读取资料，通过 Playwright 辅助填写
 | :--- | :--- |
 | 档案管理 | 校验、查看 YAML/JSON；从可提取文本的 PDF 和单个 `.tex` 文件调用模型生成档案 |
 | 字段映射 | 纠错记忆、固定规则、关键词启发式；表单填写本身不调用 LLM |
-| 基础控件 | 文本框、文本域、原生 select、radio/checkbox、文件上传；读取实时值、选中状态和关联 label |
-| 就绪检查 | 等待动态表单完成渲染后检查当前可见阶段的必填项；填写失败或人工补填后仍不满足要求时暂停 |
+| 基础控件 | 文本框、文本域、原生 select、radio/checkbox、文件上传；读取实时值、选中状态和关联 label；支持同源 iframe 控件 |
+| 就绪检查 | 等待动态表单完成渲染后检查当前可见阶段的必填项；字段检查失败、填写失败或人工补填后仍不满足要求时暂停 |
 | 北森 | 识别部分阶段标记和“下一步”按钮，验证阶段变化；识别最终提交按钮并停下 |
-| Moka / 通用 | 基础控件填充；目前按单页处理，尚无可靠的页面类型与最终阶段识别 |
+| Moka / 通用 | 基础控件填充；登录后会重新识别页面和平台，弹窗/新标签会切换到最新页面 |
 | 复杂组件 | 院校弹窗、搜索下拉会在找不到并回读候选项时暂停；级联、自定义日期弹窗、动态重复经历尚未完整支持；原生 date/month 已支持，缺失精度时暂停而不补造日期 |
 | 跟踪 | SQLite 保存申请、执行轮次、阶段快照、审计事件；CLI 可查询记录 |
 | 恢复与提交后状态 | 支持 `apply resume` 重新打开 checkpoint 的实际 URL 并扫描；候选人、岗位、周期隔离，并保留已保存的披露策略；提交结果确认尚未实现 |
@@ -45,7 +45,7 @@ uv sync
 uv run playwright install chromium
 ```
 
-项目声明 Python >= 3.11；最近一次完整测试在 Python 3.11 和 3.14 上均为 392 项通过。
+项目声明 Python >= 3.11；最近一次完整测试在 Python 3.11 和 3.14 上均为 407 项通过。
 
 ### 2. 统一资料目录
 
@@ -175,7 +175,7 @@ APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run pytest tests/integration/ -q
 APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run --isolated --python 3.13 --locked pytest -q
 ```
 
-当前共有 392 项测试，其中包含真实浏览器表单回归、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
+当前共有 407 项测试，其中包含真实浏览器表单回归、同源 iframe、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
 
 测试通过说明已覆盖的行为符合断言，不代表真实招聘站点全功能兼容。后续重点包括上下文映射、附件类型约束、登录与页面识别、可恢复申请状态机，以及真实平台组件适配。
 

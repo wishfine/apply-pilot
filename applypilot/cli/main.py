@@ -14,7 +14,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 import uuid
 import hashlib
 
@@ -254,7 +254,16 @@ def _canonical_job_id_from_url(url: str) -> str:
     parsed = urlparse(url.strip())
     netloc = parsed.netloc.lower()
     path = parsed.path.rstrip("/")
-    query = f"?{parsed.query}" if parsed.query else ""
+    volatile_keys = {
+        "userid", "user_id", "frompage", "from_page", "seqid", "resumeid",
+        "resume_id", "backurl", "aud", "auid", "uuid", "sessionid", "token",
+    }
+    stable_query = sorted(
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key.lower() not in volatile_keys
+    )
+    query = f"?{urlencode(stable_query, doseq=True)}" if stable_query else ""
     fragment = f"#{parsed.fragment}" if parsed.fragment else ""
     norm = f"{netloc}{path}{query}{fragment}"
     url_hash = hashlib.sha256(norm.encode("utf-8")).hexdigest()[:12]

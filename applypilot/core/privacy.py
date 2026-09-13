@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import os
 from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from applypilot.core.config import get_app_home_dir
 from applypilot.domain.base import FieldPolicy, LogStrategy, SensitivityLevel
@@ -34,6 +35,27 @@ def get_local_audit_secret() -> bytes:
         except OSError:
             pass
     return secret
+
+
+def redact_url(url: str) -> str:
+    """Remove credential, identity, and session query values before audit logging."""
+    if not url:
+        return url
+    try:
+        parsed = urlsplit(str(url))
+        sensitive = {
+            "userid", "user_id", "resumeid", "resume_id", "seqid", "token",
+            "session", "sessionid", "auth", "authorization", "aud", "auid",
+            "backurl", "callback", "code",
+        }
+        safe_query = [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() not in sensitive
+        ]
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(safe_query), parsed.fragment))
+    except Exception:
+        return "<redacted-url>"
 
 
 class AuditSanitizer:

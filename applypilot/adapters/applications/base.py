@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any, List, Optional, Protocol, runtime_checkable
 from pydantic import BaseModel
 
@@ -74,10 +75,21 @@ class BaseApplicationAdapter:
 
             if can_handle:
                 try:
+                    # Inspect the bound method before calling it.  Retrying on
+                    # TypeError is unsafe: an implementation can mutate the
+                    # field and then raise TypeError, causing a duplicate fill.
                     try:
+                        parameters = inspect.signature(filler.fill).parameters.values()
+                        accepts_context = any(
+                            parameter.name == "field_info"
+                            or parameter.kind is inspect.Parameter.VAR_KEYWORD
+                            for parameter in parameters
+                        )
+                    except (TypeError, ValueError):
+                        accepts_context = False
+                    if accepts_context:
                         return await filler.fill(page, element, value, field_info=field_info)
-                    except TypeError:
-                        return await filler.fill(page, element, value)
+                    return await filler.fill(page, element, value)
                 except Exception:
                     return FillResult(
                         success=False,
@@ -115,13 +127,20 @@ class BaseApplicationAdapter:
                     && getComputedStyle(el).visibility !== 'hidden';
                 const text = (document.body ? document.body.innerText : '') || '';
                 const strongLoginText = /(请先登录|扫码登录|微信扫码|账号密码登录|短信登录|登录后投递|验证码登录)/i.test(text);
+                const strongLoginHeading = Array.from(document.querySelectorAll(
+                    'h1, h2, h3, [role=heading], [role=dialog]'
+                )).some(el => visible(el) && /(请先登录|扫码登录|微信扫码|账号密码登录|短信登录|登录后投递|验证码登录)/i.test((el.innerText || '').trim()));
                 const authInputs = Array.from(document.querySelectorAll(
                     'input[type=password], input[name*=password], input[name*=pwd], input[placeholder*=密码], input[placeholder*=验证码]'
                 )).filter(visible);
                 const loginFormButton = Array.from(document.querySelectorAll(
                     'form button, form input[type=submit], [role=dialog] button, [role=dialog] input[type=submit]'
                 )).some(el => visible(el) && /登录|sign in|log in/i.test((el.textContent || el.value || '').trim()));
-                return strongLoginText || authInputs.length > 0 || loginFormButton;
+                const visibleControls = Array.from(document.querySelectorAll(
+                    'input:not([type=hidden]), select, textarea, button'
+                )).filter(visible);
+                return strongLoginHeading || authInputs.length > 0 || loginFormButton
+                    || (strongLoginText && visibleControls.length === 0);
             }""",
         )
         return result is True

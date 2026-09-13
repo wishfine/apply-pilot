@@ -1,6 +1,6 @@
 """Unit tests for AuditSanitizer and secret management."""
 import stat
-from applypilot.core.privacy import AuditSanitizer, get_local_audit_secret
+from applypilot.core.privacy import AuditSanitizer, get_local_audit_secret, redact_url
 from applypilot.domain.base import FieldPolicy, SensitivityLevel, LogStrategy
 
 
@@ -118,3 +118,12 @@ def test_get_local_audit_secret(tmp_path, monkeypatch):
     # Check permissions (0o600 -> stat.S_IRUSR | stat.S_IWUSR)
     file_mode = stat.S_IMODE(secret_file.stat().st_mode)
     assert file_mode == 0o600
+
+
+def test_redact_url_removes_sensitive_query_values():
+    redacted = redact_url(
+        "https://example.com/form?jobAdId=abc&userId=200540681&resumeid=secret&fromPage=job"
+    )
+    assert "jobAdId=abc" in redacted
+    assert "userId" not in redacted
+    assert "resumeid" not in redacted

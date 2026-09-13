@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
@@ -306,17 +307,64 @@ class PlaywrightPage:
             loc = await loc
         return loc
 
+    def _child_frames(self) -> list[Any]:
+        """Return live child frames without making frame access a hard dependency."""
+        try:
+            frames = list(getattr(self._page, "frames", []) or [])
+        except Exception:
+            return []
+        children: list[Any] = []
+        for frame in frames:
+            try:
+                if getattr(frame, "parent_frame", None) is not None:
+                    children.append(frame)
+            except Exception:
+                continue
+        return children
+
+    async def _locator_elements(self, owner: Any, selector: str) -> list[Any]:
+        """Resolve all matching locators in a page or child frame."""
+        loc = owner.locator(selector)
+        if asyncio.iscoroutine(loc):
+            loc = await loc
+        if hasattr(loc, "all"):
+            locs = loc.all()
+            if asyncio.iscoroutine(locs):
+                locs = await locs
+            if isinstance(locs, (list, tuple)):
+                return list(locs)
+        if hasattr(loc, "count"):
+            cnt = loc.count()
+            if asyncio.iscoroutine(cnt):
+                cnt = await cnt
+            if int(cnt) == 0:
+                return []
+            resolved = []
+            for i in range(int(cnt)):
+                item = loc.nth(i)
+                if asyncio.iscoroutine(item):
+                    item = await item
+                resolved.append(item)
+            return resolved
+        if hasattr(loc, "all"):
+            locs = loc.all()
+            if asyncio.iscoroutine(locs):
+                locs = await locs
+            return list(locs)
+        return []
+
     async def find(self, selector: str) -> Optional[BrowserElement]:
         try:
-            loc = await self._resolve_locator(selector)
-            if hasattr(loc, "count"):
-                cnt = loc.count()
-                if asyncio.iscoroutine(cnt):
-                    cnt = await cnt
-                if cnt == 0:
-                    return None
-            first_loc = loc.first if hasattr(loc, "first") else loc
-            return PlaywrightElement(first_loc, policy=self._policy, rate_limiter=self._rate_limiter)
+            locs = await self._locator_elements(self._page, selector)
+            for frame in self._child_frames():
+                try:
+                    locs.extend(await self._locator_elements(frame, selector))
+                except Exception:
+                    # Cross-origin or already detached frames can be skipped.
+                    continue
+            if not locs:
+                return None
+            return PlaywrightElement(locs[0], policy=self._policy, rate_limiter=self._rate_limiter)
         except BrowserDriverError:
             raise
         except Exception as e:
@@ -324,24 +372,16 @@ class PlaywrightPage:
 
     async def find_all(self, selector: str) -> list[BrowserElement]:
         try:
-            loc = await self._resolve_locator(selector)
-            if hasattr(loc, "all"):
-                locs = loc.all()
-                if asyncio.iscoroutine(locs):
-                    locs = await locs
-                return [
-                    PlaywrightElement(l, policy=self._policy, rate_limiter=self._rate_limiter)
-                    for l in locs
-                ]
-            elif hasattr(loc, "count"):
-                cnt = loc.count()
-                if asyncio.iscoroutine(cnt):
-                    cnt = await cnt
-                return [
-                    PlaywrightElement(loc.nth(i), policy=self._policy, rate_limiter=self._rate_limiter)
-                    for i in range(cnt)
-                ]
-            return []
+            locs = await self._locator_elements(self._page, selector)
+            for frame in self._child_frames():
+                try:
+                    locs.extend(await self._locator_elements(frame, selector))
+                except Exception:
+                    continue
+            return [
+                PlaywrightElement(l, policy=self._policy, rate_limiter=self._rate_limiter)
+                for l in locs
+            ]
         except BrowserDriverError:
             raise
         except Exception as e:
@@ -373,10 +413,36 @@ class PlaywrightPage:
             reason.strip(),
             script[:120],
         )
-        try:
+        async def evaluate(owner: Any) -> Any:
             if arg is not None:
-                return await self._page.evaluate(script, arg)
-            return await self._page.evaluate(script)
+                return await owner.evaluate(script, arg)
+            return await owner.evaluate(script)
+
+        try:
+            main_result = await evaluate(self._page)
+            if isinstance(main_result, bool) and main_result is True:
+                return True
+            if not isinstance(main_result, (bool, dict)) and main_result is not None:
+                return main_result
+            frame_results: list[Any] = []
+            for frame in self._child_frames():
+                try:
+                    frame_result = await evaluate(frame)
+                    frame_results.append(frame_result)
+                except Exception:
+                    continue
+
+            # Boolean probes are used for platform/login/final-stage detection.
+            # A true result in any child frame is sufficient.
+            if isinstance(main_result, bool):
+                return any(result is True for result in frame_results)
+            # Stage marker scripts return dictionaries.  Prefer the richest
+            # context so an iframe-hosted form is not mistaken for an empty page.
+            if isinstance(main_result, dict):
+                dict_results = [result for result in frame_results if isinstance(result, dict)]
+                if dict_results:
+                    return max([main_result, *dict_results], key=lambda result: len(json.dumps(result, default=str)))
+            return main_result
         except BrowserDriverError:
             raise
         except Exception as e:
@@ -477,22 +543,6 @@ class PlaywrightBackend:
     async def current_page(self) -> BrowserPage:
         try:
             await self._ensure_context()
-            if self._current_page is not None:
-                page_obj = getattr(self._current_page, "_page", None)
-                is_closed = False
-                if page_obj and hasattr(page_obj, "is_closed"):
-                    try:
-                        res = page_obj.is_closed()
-                        if asyncio.iscoroutine(res):
-                            res = await res
-                        if isinstance(res, bool):
-                            is_closed = res
-                    except Exception:
-                        is_closed = True
-                if not is_closed:
-                    return self._current_page
-                self._current_page = None
-
             open_pages = []
             if hasattr(self._context, "pages") and self._context.pages:
                 for p in self._context.pages:
@@ -510,8 +560,23 @@ class PlaywrightBackend:
                         open_pages.append(p)
 
             if open_pages:
+                # Browser contexts append popup/new-tab pages.  Always use the
+                # newest live page so a login flow opened in a popup is resumed.
                 page = open_pages[-1]
+                if self._current_page is not None and getattr(self._current_page, "_page", None) is page:
+                    return self._current_page
             else:
+                if self._current_page is not None:
+                    page_obj = getattr(self._current_page, "_page", None)
+                    if page_obj is not None:
+                        try:
+                            closed = page_obj.is_closed()
+                            if asyncio.iscoroutine(closed):
+                                closed = await closed
+                            if not closed:
+                                return self._current_page
+                        except Exception:
+                            pass
                 page = await self._context.new_page()
 
             self._current_page = PlaywrightPage(page, policy=self.policy, rate_limiter=self._rate_limiter)

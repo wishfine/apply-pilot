@@ -123,6 +123,26 @@ def test_model_supplied_profile_ids_are_replaced_with_content_derived_ids():
     assert first["profile_id"].startswith("cand_")
 
 
+def test_profile_id_derivation_normalizes_aliases_before_hashing():
+    canonical = ResumeIngestionService._normalize_profile_dict(
+        {"identity": {"name": "甲"}, "experiences": [{"org_name": "公司", "title": "工程师"}]}
+    )
+    aliases = ResumeIngestionService._normalize_profile_dict(
+        {"identity": {"name": "甲"}, "experiences": [{"company_name": "公司", "job_title": "工程师"}]}
+    )
+    assert canonical["profile_id"] == aliases["profile_id"]
+
+
+def test_profile_id_stays_stable_when_non_identity_facts_change():
+    first = ResumeIngestionService._normalize_profile_dict(
+        {"identity": {"name": "甲"}, "skills": [{"name": "Python", "category": "programming"}]}
+    )
+    updated = ResumeIngestionService._normalize_profile_dict(
+        {"identity": {"name": "甲"}, "skills": [{"name": "Rust", "category": "programming"}]}
+    )
+    assert first["profile_id"] == updated["profile_id"]
+
+
 @pytest.mark.asyncio
 async def test_parse_text_empty_or_whitespace_raises_error():
     service = ResumeIngestionService(api_key="test_api_key")

@@ -119,6 +119,8 @@ async def test_moka_search_select_filler():
     assert res.action_type == "moka_search_select"
     assert res.observed_value == "计算机科学与技术"
     assert res.verification_status == "verified_match"
+    script = mock_page.execute_unsafe_script.await_args.args[1]
+    assert ", li" not in script
 
 
 @pytest.mark.asyncio
@@ -146,6 +148,8 @@ async def test_beisen_modal_school_picker():
     assert res.action_type == "beisen_modal_pick"
     assert res.observed_value == "清华大学"
     assert res.verification_status == "verified_match"
+    script = mock_page.execute_unsafe_script.await_args.args[1]
+    assert ", li" not in script
 
 
 @pytest.mark.asyncio
@@ -174,6 +178,26 @@ async def test_generic_application_adapter():
     mock_page.execute_unsafe_script = AsyncMock(return_value=True)
     is_final = await adapter.is_final_review(mock_page)
     assert is_final is True
+
+
+@pytest.mark.asyncio
+async def test_filler_internal_type_error_is_not_retried():
+    calls = 0
+
+    class BuggyFiller:
+        async def can_handle(self, element, field_info):
+            return True
+
+        async def fill(self, page, element, value, *, field_info=None):
+            nonlocal calls
+            calls += 1
+            raise TypeError("internal filler bug")
+
+    adapter = BaseApplicationAdapter([BuggyFiller()])
+    result = await adapter.fill_field(AsyncMock(), AsyncMock(), {"field_type": "text"}, "x")
+    assert calls == 1
+    assert result.success is False
+    assert result.error_code == "FILLER_EXECUTION_ERROR"
 
 
 @pytest.mark.asyncio

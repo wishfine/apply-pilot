@@ -85,7 +85,7 @@ class BeisenModalSchoolPicker:
                 """value => {
                     const visible = el => !!el.getClientRects().length
                         && getComputedStyle(el).visibility !== 'hidden';
-                    const selectors = '[role=option], .el-select-dropdown__item, .ant-select-item-option, .school-option, li';
+                    const selectors = '[role=option], .el-select-dropdown__item, .ant-select-item-option, .school-option';
                     const option = Array.from(document.querySelectorAll(selectors)).find(el =>
                         visible(el) && (el.textContent || '').trim() === value);
                     if (!option) return false;

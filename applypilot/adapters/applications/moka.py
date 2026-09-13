@@ -79,7 +79,7 @@ class MokaSearchSelectFiller:
                 """value => {
                     const visible = el => !!el.getClientRects().length
                         && getComputedStyle(el).visibility !== 'hidden';
-                    const selectors = '[role=option], .moka-option, .moka-select-option, .ant-select-item-option, li';
+                    const selectors = '[role=option], .moka-option, .moka-select-option, .ant-select-item-option';
                     const option = Array.from(document.querySelectorAll(selectors)).find(el =>
                         visible(el) && (el.textContent || '').trim() === value);
                     if (!option) return false;

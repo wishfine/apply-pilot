@@ -23,6 +23,12 @@ def test_canonical_job_id_is_deterministic_for_same_url():
     assert id1.startswith("job_")
 
 
+def test_canonical_job_id_ignores_volatile_application_parameters():
+    base = "https://iflytek.zhiye.com/form?jobAdId=abc123&fromPage=job&userId=200540681"
+    changed = "https://iflytek.zhiye.com/form?userId=999999&jobAdId=abc123&fromPage=detail"
+    assert _canonical_job_id_from_url(base) == _canonical_job_id_from_url(changed)
+
+
 def test_cli_apply_resume_command_resumes_application(tmp_path: Path, monkeypatch):
     import asyncio
     runner = CliRunner()

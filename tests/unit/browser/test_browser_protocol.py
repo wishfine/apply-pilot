@@ -245,6 +245,41 @@ async def test_playwright_page_find_and_find_all():
 
 
 @pytest.mark.asyncio
+async def test_playwright_page_scans_same_origin_frames():
+    main_locator = AsyncMock()
+    main_locator.count.return_value = 0
+    frame_locator = AsyncMock()
+    frame_locator.count.return_value = 1
+    frame_element = AsyncMock()
+    frame_locator.all.return_value = [frame_element]
+
+    mock_page = MagicMock()
+    mock_page.locator.return_value = main_locator
+    frame = MagicMock()
+    frame.locator.return_value = frame_locator
+    mock_page.frames = [frame]
+
+    page = PlaywrightPage(mock_page, policy=InteractionPolicy(min_action_interval_ms=0))
+    assert await page.find("input") is not None
+    elements = await page.find_all("input")
+    assert len(elements) == 1
+    assert isinstance(elements[0], BrowserElement)
+
+
+@pytest.mark.asyncio
+async def test_playwright_page_boolean_scripts_probe_frames():
+    mock_page = MagicMock()
+    mock_page.evaluate = AsyncMock(return_value=False)
+    frame = MagicMock()
+    frame.evaluate = AsyncMock(return_value=True)
+    mock_page.frames = [frame]
+
+    page = PlaywrightPage(mock_page)
+    assert await page.execute_unsafe_script("probe", "() => true") is True
+    frame.evaluate.assert_awaited_once_with("() => true")
+
+
+@pytest.mark.asyncio
 async def test_playwright_page_wait_for():
     mock_page = AsyncMock()
     mock_locator = AsyncMock()
@@ -391,6 +426,26 @@ async def test_playwright_backend_creates_new_page_when_busy(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_playwright_backend_current_page_prefers_newest_popup(tmp_path: Path):
+    backend = PlaywrightBackend(headless=True, user_data_dir=tmp_path / "popup_test")
+    old_page = MagicMock()
+    old_page.url = "https://example.com/login"
+    old_page.is_closed.return_value = False
+    new_page = MagicMock()
+    new_page.url = "https://example.com/form"
+    new_page.is_closed.return_value = False
+    context = MagicMock()
+    context.pages = [old_page, new_page]
+    backend._context = context
+    backend._ensure_context = AsyncMock(return_value=context)
+    backend._current_page = PlaywrightPage(old_page)
+
+    current = await backend.current_page()
+    assert isinstance(current, PlaywrightPage)
+    assert current._page is new_page
+
+
+@pytest.mark.asyncio
 async def test_playwright_backend_launch_error_wrapped(tmp_path: Path):
     backend = PlaywrightBackend(
         headless=True,
@@ -468,4 +523,3 @@ async def test_playwright_backend_close_robustness(tmp_path: Path):
     mock_playwright.stop.assert_awaited_once()
     assert backend._context is None
     assert backend._playwright is None
-
