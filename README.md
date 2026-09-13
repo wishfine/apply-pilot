@@ -2,253 +2,180 @@
 
 # 🚀 ApplyPilot
 
-**面向中国校招与社招场景的本地优先（Local-first）智能求职网申 Agent**
+**面向中国校招与社招的本地网申辅助工具**
 
-*One profile. Every application. —— 一份资料，投遍所有岗位。*
+*One profile. Every application.*
 
-[![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-%3E%3D3.11-blue.svg)](pyproject.toml)
 [![Tests](https://img.shields.io/badge/Tests-305%20Passed-brightgreen.svg)](tests/)
 [![Architecture](https://img.shields.io/badge/Design-Local--first-orange.svg)](docs/superpowers/specs/2026-09-12-apply-pilot-v0.1-design.md)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 </div>
 
----
+ApplyPilot 从本地候选人档案读取资料，通过 Playwright 辅助填写招聘表单，在最终提交前交给用户核对。档案支持身份、联系方式、多段教育与经历、技能、附件，以及中国校招和国央企扩展信息。
 
-## 📖 项目简介
+**当前版本是 v0.1 原型。** 数据模型覆盖的字段多于自动填写已支持的字段；平台适配器已通过本地合成表单测试，尚未在真实招聘站点全面验证。已知缺陷和下一步开发建议见[项目审查记录](docs/reviews/2026-09-13-project-audit.md)。
 
-每年春秋招与社招求职季，求职者往往需要向**央国企、互联网大厂、金融银行、科研院所**等数十家甚至上百家企业投递网申。每家单位采用不同的招聘系统（如**北森、Moka、自建系统**），求职者被迫陷入无休止的“复制粘贴基本信息、手动填写家庭成员、反复勾选学历背景”的机械内耗中。
+## 当前能力与边界
 
-**ApplyPilot** 专为解决这一困境而生：求职者仅需在本地维护一份详实严谨的**核心事实档案（CandidateProfile）**，ApplyPilot 即可在本地受控浏览器中，智能识别目标招聘系统、自动完成多阶段表单填报与回读校验，并在最终提交前主动挂起，由你亲自完成终审与点击提交。
+| 能力 | 当前实现 |
+| :--- | :--- |
+| 档案管理 | 校验、查看 YAML/JSON；从可提取文本的 PDF 和单个 `.tex` 文件调用模型生成档案 |
+| 字段映射 | 纠错记忆、固定规则、关键词启发式；表单填写本身不调用 LLM |
+| 基础控件 | 文本框、文本域、原生 select、radio/checkbox、文件上传；读取实时值、选中状态和关联 label |
+| 就绪检查 | 当前可见阶段的必填项检查；填写失败或人工补填后仍不满足要求时暂停 |
+| 北森 | 识别部分阶段标记和“下一步”按钮，验证阶段变化；识别最终提交按钮并停下 |
+| Moka / 通用 | 基础控件填充；目前按单页处理，尚无可靠的页面类型与最终阶段识别 |
+| 复杂组件 | 院校弹窗、搜索下拉只有初步实现；级联、日期组件、动态重复经历尚未完整支持 |
+| 跟踪 | SQLite 保存申请、执行轮次、阶段快照、审计事件；CLI 可查询记录 |
+| 恢复与提交后状态 | 保存了 checkpoint，但可靠的跨进程恢复、重复申请去重、提交结果确认尚未实现 |
 
----
+`CandidateProfile` 是事实来源，`ResumeVariant` 是展示与选择的数据模型。当前 CLI 尚未提供变体选择、简历导出和纠错记忆编辑命令。自动提取的资料仍需人工核实，结构校验不能证明事实正确。
 
-## 🛡️ 核心设计原则
+## 快速开始
 
-| 维度 | 传统自动化脚本 / 劣质 Agent | ApplyPilot 的设计准则 |
-| :--- | :--- | :--- |
-| **真实性保障** | 依赖大模型自由发挥，容易发生**事实幻觉、臆造经历** | **`CandidateProfile = Truth`**：事实库是唯一真理，杜绝一切无中生有与虚假默认值。 |
-| **简历针对性** | 一份简历打天下，或改动事实原件 | **`ResumeVariant = Selection + Ordering + Presentation`**：变体仅剪裁与排序事实，每条亮点强制溯源至事实 ID。 |
-| **隐私数据安全** | 将求职者身份证、家庭背景、手机号全量发给云端 LLM | **本地优先（Local-first）**：数据保存在本地 SQLite（WAL 模式），本地 `0o600` HMAC-SHA256 脱敏指纹，敏感数据默认不出网。 |
-| **账号与反爬** | 强行逆向验证码接口，极易触发风控或封号 | **持久化浏览器（Persistent Context）**：求职者在真机浏览器中手动完成微信扫码或短信登录一次，会话长期复用。 |
-| **投递控制权** | 盲目无人全自动提交，填错无法挽回 | **人机协同终审（Human-in-the-Loop）**：表单自动填好后严格停在 `READY_REVIEW` 卡点，由求职者在浏览器内亲自确认并点击提交。 |
+以下命令适用于 macOS/Linux 的 shell；Windows 可设置同名环境变量，使用对应的路径与复制命令。
 
----
-
-## 🌐 支持平台生态 (v0.1)
-
-- **北森 (Beisen / iTalent)**：支持多步骤向导流程、院校弹窗选择器（Modal School Picker）、级联选择。
-- **Moka (MokaHR)**：支持单页长表单、搜索下拉选择器（Search-Select）、日期组件。
-- **通用系统 (Generic HTML5)**：标准 HTML5 表单自动解析、文本/电话/邮箱/数字智能填充与平滑回退。
-
----
-
-## ⚡ 快速上手 (Quick Start)
-
-### 1. 安装环境与依赖
-
-本项目基于现代 Python 工具链 **`uv`**（推荐）进行包管理：
+### 1. 安装
 
 ```bash
-# 1. 克隆代码仓库
 git clone git@github.com:wishfine/apply-pilot.git
 cd apply-pilot
-
-# 2. 同步依赖环境 (要求 Python >= 3.11)
 uv sync
-
-# 3. 安装 Playwright Chromium 浏览器核心
 uv run playwright install chromium
 ```
 
----
+项目声明 Python >= 3.11；最近一次完整测试在 Python 3.13 和 3.14 上均为 305 项通过。
 
-### 2. 第一步：配置你的核心事实档案 (`profile.yaml`)
-
-你可以选择以下两种方式之一准备你的求职档案：
-
-#### 方式 A：从现有简历文件一键智能解析（推荐）
-如果你已有制作好的 **PDF** 或 **LaTeX (`.tex`)** 简历，可以直接使用内置的解析命令一键抽取为结构化档案：
+### 2. 统一资料目录
 
 ```bash
-# 从 PDF 简历提取档案（使用 OpenAI / DeepSeek / 本地 Ollama 等模型）
-uv run applypilot profile import -f resume.pdf -o ~/.applypilot/profile.yaml
-
-# 或从 LaTeX 简历提取
-uv run applypilot profile import -f resume.tex -o ~/.applypilot/profile.yaml
+export APPLYPILOT_HOME="$HOME/.applypilot"
+mkdir -p "$APPLYPILOT_HOME"
 ```
 
-> 💡 **提示**：可通过 `--model` 与 `--api-key` 指定大模型，或在环境变量中配置 `APPLYPILOT_LLM_API_KEY`。
+后续终端也需设置该变量。未设置时，程序使用 `platformdirs` 返回的操作系统应用数据目录，而非固定的 `~/.applypilot`。查看当前目录：
 
-#### 方式 B：从模板手动复制填写
 ```bash
-cp examples/profile.example.yaml ~/.applypilot/profile.yaml
+uv run python -c 'from applypilot.core.config import get_app_home_dir; print(get_app_home_dir())'
 ```
 
-打开 `~/.applypilot/profile.yaml`，填入你的客观真实信息。该模板包含中国校招与社招的所有核心字段：
-- **身份信息**：姓名、拼音、性别、出生日期、证件号码、民族、健康状况；
-- **联系信息**：手机、邮箱、常住城市、紧急联系人；
-- **教育背景**：多段学历层次（高中/专科/本科/硕士/博士）、学位、专业、毕业时间、GPA、是否第一学历、是否最高学历；
-- **经历与项目**：实习经历、项目经历、技术栈、核心成就亮点（Bullets）；
-- **专业技能**：技能类别、熟练度；
-- **附件资产**：本地简历 PDF 路径（用于自动上传挂载）；
-- **校招专有**：毕业年月、CET-4/6 成绩、英语标化考试、派遣证资格；
-- **体制内/国央企扩展**：政治面貌、入党年月、籍贯、户口所在地、家庭成员、亲属回避与利益冲突申报。
+### 3. 准备候选人档案
 
-> 💡 **提示**：模板中的字段均为结构化严格类型，非必填字段如果暂时留空，ApplyPilot 在网申遇到选填时会自动保持留白，不会胡乱编造。
-
----
-
-### 3. 第二步：校验你的事实档案
-
-使用内置校验命令验证你的档案格式是否合法：
+方式 A：复制[示例模板](examples/profile.example.yaml)，替换全部示例资料。
 
 ```bash
-# 验证 profile.yaml 结构正确性
-uv run applypilot profile validate -p profile.yaml
-
-# 输出示例：
-# Profile validated successfully!
-# Candidate: 张三 (cand_zhangsan_2026)
-# Education records: 2
-# Experience records: 2
-# Project records: 1
+cp examples/profile.example.yaml "$APPLYPILOT_HOME/profile.yaml"
 ```
 
-查看已配置的核心摘要：
+方式 B：从简历生成档案。
 
 ```bash
-uv run applypilot profile show -p profile.yaml
+# 先在本地环境中配置 APPLYPILOT_LLM_API_KEY
+uv run applypilot profile import -f resume.pdf
+# 或
+uv run applypilot profile import -f resume.tex
 ```
 
----
+`profile import` 会将提取的简历全文发送给配置的模型服务。默认地址为 `https://api.openai.com/v1`，默认模型为 `gpt-4o-mini`；可通过 `--base-url`、`--model` 或环境变量覆盖。当前实现要求 API key，包括连接本地兼容服务时；可按该服务要求提供占位值。
 
-### 4. 第三步：启动智能自动网申会话
+支持的环境变量：`APPLYPILOT_LLM_API_KEY`、`APPLYPILOT_LLM_BASE_URL`、`APPLYPILOT_LLM_MODEL`；API key 和地址也可读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`。导入没有全文脱敏或事实核验步骤，也没有 OCR。重复导入同一输出路径会覆盖文件；需要保留已有档案时使用 `-o` 指定新路径。
 
-只需一条命令即可开启目标职位的网申流程：
+导入目前不会自动把源 PDF 登记为上传附件。需要上传简历时，在档案中添加：
 
-```bash
-uv run applypilot apply run -u "https://app.mokahr.com/campus-recruitment/your-target-company/10001#/job/xxx"
+```yaml
+assets:
+  - asset_id: asset_resume_pdf
+    asset_type: resume_pdf
+    file_path: /absolute/path/to/resume.pdf
+    title: 求职简历
 ```
 
-#### 自动化全流程体验：
-1. **浏览器唤起**：自动弹出本地 Chromium 浏览器（保留本地登录状态，若首次打开只需微信扫码或短信登录一次）；
-2. **多信号平台检测**：结合 URL Host、DOM 结构与运行时脚本，毫秒级自动判别目标招聘平台（Moka / 北森 / 通用）；
-3. **全类型表单自动化**：
-   - 智能识别文本输入框、原生 `<select>` 下拉框、单选/复选框（Radio/Checkbox）；
-   - 遇到“上传简历/附件”时，自动调取档案中配置的本地 PDF 完成物理挂载上传；
-   - 基于三级决策树（Scoped 纠错记忆 $\to$ 权威规则 $\to$ 语义匹配）将表单控件与事实库路径精确对齐；
-   - 严格进行隐私门禁（Disclosure Policy）过滤；
-   - 读取页面现有值，若已填写且语义等价（如“北京市”与“北京”）则自动跳过，避免重复键入；
-4. **阶段必填就绪度诊断 (Readiness Diagnostics)**：
-   - 每阶段填报完成后，自动执行必填约束探测；
-   - 若发现招聘系统要求的必填项在本地档案中缺失，终端会弹出 Rich 诊断表格并暂停提供决策：
-     - `[1] 切换至浏览器手动补填`
-     - `[2] 终端逐项即时补全 (自动填入网页，并一键同步回写 profile.yaml 终身复用)`
-     - `[3] 暂停并退出本次网申 (PAUSED)`
-5. **终审卡点（READY_REVIEW）**：
-   - 全部表单填写完毕后，自动化引擎**主动停止**，控制台展示绿色终审面板；
-   - 你可以在已打开的浏览器页面中逐项核对所有字段，最终亲自点击提交按钮！
+请核对文件路径和类型。当前附件回退逻辑存在误选其他附件的已知问题，详见审查记录。
 
----
-
-### 5. 第四步：跟踪与查看申请看板
-
-ApplyPilot 内置基于 SQLite WAL 模式的不可篡改审计追踪账本，随时查看申请进度：
+### 4. 校验资料并运行
 
 ```bash
-# 查看所有申请记录及当前阶段状态
+uv run applypilot profile validate -p "$APPLYPILOT_HOME/profile.yaml"
+uv run applypilot profile show
+uv run applypilot apply run -u "https://目标招聘网站/实际表单地址"
+```
+
+尽量使用已登录、已打开填写步骤的表单地址。浏览器使用独立的持久化目录，不会自动复用你日常 Chrome 的登录状态；登录、验证码、岗位详情页到表单的跳转尚未形成完整流程。
+
+运行时：
+
+1. 打开 Chromium，检测平台并扫描控件。
+2. 按规则匹配本地档案，应用披露策略后尝试填写。
+3. 回读页面，检查必填项。出现缺失时可选择浏览器补填、终端补填或暂停。
+4. 人工补填后再次检查；仍未满足要求则进入 `PAUSED`。
+5. 到达 `READY_REVIEW` 后，在浏览器中核对并亲自提交，完成后再回终端按回车。回车结束流程后浏览器会关闭。
+
+终端补填目前仅适合普通文本控件；数组路径（如某段教育经历）不支持自动回写，下拉框和文件上传等请在浏览器处理。JSON 档案回写会保留 JSON 格式。
+
+`READY_REVIEW` 目前不能证明已到达真实站点的最终提交页，也不能证明全部资料正确。尤其是 Moka/通用适配器，在登录页或未加载出表单时可能误报此状态。`--headless` 不适合需要浏览器人工接管的流程。
+
+### 5. 查看记录
+
+```bash
 uv run applypilot track list
-
-# 按状态筛选（如筛选处于终审阶段的岗位）
-uv run applypilot track list -s ready_review
-
-# 查看特定申请的详细上下文与审计统计
+uv run applypilot track list -s paused
 uv run applypilot track status app_xxx
 ```
 
----
+这些命令提供查询功能。当前没有 `resume` 命令，也没有“标记已提交”命令；重新执行同一 URL 会创建新的岗位标识，不能据此恢复原申请。
 
-## 🛠️ CLI 命令完整参考
+## CLI 参考
 
-```bash
-applypilot [OPTIONS] COMMAND [ARGS]...
+| 命令 | 主要参数 |
+| :--- | :--- |
+| `profile import` | `-f/--file`；`-o/--output`；`-m/--model`；`-b/--base-url`；`-k/--api-key` |
+| `profile validate` | `-p/--path`，必填 |
+| `profile show` | `-p/--path`，默认读取应用目录的 `profile.yaml` |
+| `apply run` | `-u/--job-url`，必填；`-p/--profile`；`--headless`；`--interactive-readiness/--no-interactive-readiness` |
+| `track list` | `-s/--status` |
+| `track status` | 申请 ID |
 
-选项:
-  --version, -v    显示版本信息 (ApplyPilot v0.1.0)
-  --help           显示帮助信息
+`profile import` 默认输出到应用目录的 `profile.yaml`。使用 `uv run applypilot --help` 或子命令 `--help` 查看完整参数。
 
-命令组:
-  profile          管理候选人事实库档案
-    import         从 PDF 或 LaTeX (.tex) 简历文件中解析提取档案
-                   -f, --file <FILE>          (必填) 简历源文件路径
-                   -o, --output <FILE>        (可选) 输出路径，默认 ~/.applypilot/profile.yaml
-                   -m, --model <MODEL>        (可选) LLM 模型名称
-                   -b, --base-url <URL>       (可选) OpenAI 兼容 API 基础地址
-                   -k, --api-key <KEY>        (可选) API 密钥
-    validate       校验 YAML/JSON 档案数据格式 (-p, --path <FILE>)
-    show           展示候选人核心事实摘要 (-p, --path <FILE>)
+## 本地数据与隐私
 
-  apply            自动化表单填写与人机协同投递
-    run            启动智能网申会话
-                   -u, --job-url <URL>        (必填) 目标网申岗位链接
-                   -p, --profile <FILE>       (可选) 指定档案路径，默认使用本地档案
-                   --headless                 (可选) 是否以无头模式运行（默认可视弹出）
-                   --interactive-readiness    (可选) 开启阶段必填缺失项终端交互诊断 (默认启用)
+设置上述 `APPLYPILOT_HOME` 后，目录结构为：
 
-  track            查看申请记录与审计历史
-    list           列表展示本地申请任务 (-s, --status <STATUS>)
-    status         查看指定申请的详细状态与事件看板 (APP_ID)
-```
-
----
-
-## 📂 本地数据与隐私安全机制
-
-ApplyPilot 遵循 **Local-First（本地优先）** 准则，数据存储在用户系统标准主目录下：
-
-- **macOS**: `~/Library/Application Support/ApplyPilot/`
-- **Linux**: `~/.local/share/applypilot/`
-- **Windows**: `%LOCALAPPDATA%\ApplyPilot\`
-
-目录结构：
 ```text
 ~/.applypilot/
-├── profile.yaml          # 用户核心事实库档案
-├── applypilot.db         # 本地 SQLite 主库（10 张物理表，WAL 模式并发安全）
-│                         # 存储：申请状态、断点 Checkpoint、字段动作记录、纠错记忆
-├── .audit_secret         # 本地生成的 32 字节高强度随机盐值（文件权限严格限制为 0o600）
-└── browser/              # Chromium 用户数据目录（保存登录凭据 Cookie 与 LocalStorage，免去重复登录）
+├── profile.yaml
+├── applypilot.db
+├── .audit_secret
+└── browser_profile/
 ```
 
-> 🔒 **敏感数据保护承诺**：
-> - 身份证号、政治面貌、家庭背景等敏感字段在写入日志前，全部经过本地专属密钥生成的 `hmac-sha256:{hex}` 单向脱敏指纹过滤，绝不记录明文。
-> - 未经用户明确授权的敏感字段绝不进入大模型上下文。
+- 档案和历史 `profile_revisions` 在本地以完整内容保存，没有数据库加密。
+- 字段操作审计使用 HMAC 指纹和遮罩预览；已识别的身份证、政治面貌、家庭等敏感路径不保留明文预览。这不等于整个数据库均已脱敏。
+- `DisclosurePolicy` 控制向招聘表单填写部分敏感字段；CLI 当前没有配置该策略的选项。
+- 简历导入直接发送全文到所配置的模型服务，和本地表单填写的披露策略是两条独立流程。
+- SQLite WAL 提供事务与并发支持；审计表没有防篡改签名链或禁止修改的数据库约束，不能视为不可篡改账本。
 
----
-
-## 🧪 开发与测试
-
-本项目采用严格的测试驱动开发（TDD）规范，包含完整的单元测试与端到端 Smoke 测试：
+## 开发与测试
 
 ```bash
-# 运行完整测试套件 (305 项测试全部通过（含本地浏览器回归测试）)
 uv run pytest
 
-# 运行特定模块测试
-uv run pytest tests/unit/adapters/ -v
-uv run pytest tests/unit/modules/test_engine_readiness.py -v
-uv run pytest tests/e2e/test_cli_apply_run.py -v
-
-# 强制运行真实浏览器回归测试（缺少浏览器时直接失败）
+# 强制真实浏览器回归测试实际执行，缺少浏览器时失败
 APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run pytest tests/integration/ -q
+
+# 使用隔离环境验证 Python 3.13，不替换当前 .venv
+APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run --isolated --python 3.13 --locked pytest -q
 ```
 
----
+当前共有 305 项测试，其中 19 项为本轮新增回归测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
 
-浏览器回归测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过；设置 `APPLYPILOT_REQUIRE_BROWSER_TESTS=1` 可确保这些测试实际执行。
+测试通过说明已覆盖的行为符合断言，不代表真实招聘站点全功能兼容。后续重点包括上下文映射、附件类型约束、登录与页面识别、可恢复申请状态机，以及真实平台组件适配。
 
-## 📄 开源协议与声明
+## 项目资料
 
-- 本项目基于 **MIT License** 开放源代码。
-- **免责声明**：ApplyPilot 旨在作为求职者的受控辅助工具，减轻繁重的重复表单输入负担。投递事实的真实性、最终提交动作及由此产生的一切求职结果均由求职者本人完全负责。请在点击最终提交前务必仔细核对所有表单信息。
+- [初始设计](docs/superpowers/specs/2026-09-12-apply-pilot-v0.1-design.md)
+- [导入与就绪诊断设计](docs/superpowers/specs/2026-09-12-resume-ingestion-and-readiness-diagnostics-design.md)
+- [本轮审查：剩余 bug、功能缺口与优先级](docs/reviews/2026-09-13-project-audit.md)
+
+仓库目前尚未提供 `LICENSE` 文件，正式发布前需要补齐许可文本。请在真实投递前核实资料和附件，最终提交由用户完成。
