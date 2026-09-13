@@ -141,9 +141,9 @@ class DateInputFiller:
         if parsed is not None:
             y, m, d = parsed
             if input_type == "month":
-                return f"{y:04d}-{m or 1:02d}"
+                return f"{y:04d}-{m:02d}" if m is not None else ""
             else:
-                return f"{y:04d}-{m or 1:02d}-{d or 1:02d}"
+                return f"{y:04d}-{m:02d}-{d:02d}" if m is not None and d is not None else ""
 
         if hasattr(value, "to_display"):
             disp = str(value.to_display())
@@ -179,6 +179,9 @@ class DateInputFiller:
             input_type = attr_t.strip().lower()
 
         formatted_val = self.format_date_value(value, input_type)
+
+        if not formatted_val:
+            return FillResult(success=False, action_type="set_date", error_code="INSUFFICIENT_DATE_PRECISION")
 
         try:
             if hasattr(element, "clear_text"):
@@ -300,14 +303,14 @@ class NativeSelectFiller:
                 t = opt.get("text", "")
                 l = opt.get("label", "")
                 v = opt.get("value", "")
-                if t in ("男", "男性") or l in ("男", "男性") or v in ("1", "male", "男"):
+                if t in ("男", "男性") or l in ("男", "男性") or v in ("male", "男"):
                     return opt
         elif val_lower in ("female", "f", "女", "女性"):
             for opt in options:
                 t = opt.get("text", "")
                 l = opt.get("label", "")
                 v = opt.get("value", "")
-                if t in ("女", "女性") or l in ("女", "女性") or v in ("2", "0", "female", "女"):
+                if t in ("女", "女性") or l in ("女", "女性") or v in ("female", "女"):
                     return opt
 
         # 3. Education level / academic degree semantic mapping

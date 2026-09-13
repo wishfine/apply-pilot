@@ -15,6 +15,7 @@ async def test_application_isolation_between_candidates(tmp_path: Path):
 
     mock_browser = AsyncMock()
     mock_page = AsyncMock()
+    mock_page.url = AsyncMock(return_value="https://example.test/form")
     mock_browser.open_page.return_value = mock_page
     mock_browser.wait_for_user = AsyncMock()
 

@@ -232,6 +232,12 @@ class FieldMapper:
         elif any(k in clean_key for k in ("子女", "儿子", "女儿")):
             fam_entity = "child"
 
+        if fam_entity is None:
+            for relation, entity in (("父亲", "father"), ("母亲", "mother"), ("配偶", "spouse"), ("子女", "child")):
+                if relation in clean_sec:
+                    fam_entity = entity
+                    break
+
         if fam_entity:
             if "姓名" in clean_key or "名字" in clean_key:
                 return FieldMappingResult(f"soe_extended.family_members[{fam_entity}].name", "exact_rule", 1.0)
@@ -263,16 +269,17 @@ class FieldMapper:
 
         # 3. Education stage context
         edu_level = None
-        if "本科" in clean_key or "学士" in clean_key or "本科" in clean_sec or "学士" in clean_sec:
-            edu_level = "bachelor"
-        elif "硕士" in clean_key or "研究生" in clean_key or "硕士" in clean_sec or ("研究生" in clean_sec and "生院" not in clean_sec):
-            edu_level = "master"
-        elif "博士" in clean_key or "博士" in clean_sec:
-            edu_level = "doctor"
-        elif "大专" in clean_key or "专科" in clean_key or "大专" in clean_sec or "专科" in clean_sec:
-            edu_level = "associate"
-        elif "高中" in clean_key or "高中" in clean_sec:
-            edu_level = "high_school"
+        for context in (clean_key, clean_sec):
+            for level, labels in (
+                ("doctor", ("博士",)), ("bachelor", ("本科", "学士")),
+                ("master", ("硕士", "研究生")), ("associate", ("大专", "专科")),
+                ("high_school", ("高中",)),
+            ):
+                if any(label in context for label in labels):
+                    edu_level = level
+                    break
+            if edu_level:
+                break
 
         if edu_level:
             if ("院校" in clean_key or "学校" in clean_key) and not any(k in clean_key for k in ("性质", "类型", "类别", "排名")):

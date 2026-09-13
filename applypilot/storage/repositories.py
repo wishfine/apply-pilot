@@ -85,8 +85,10 @@ class ApplicationRepository:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT * FROM applications WHERE id = ? OR canonical_job_id = ?",
-                (app_id, app_id.removeprefix("app_")),
+                """SELECT * FROM applications WHERE id = ? OR
+                (canonical_job_id = ? AND (SELECT count(*) FROM applications WHERE canonical_job_id = ?) = 1)
+                ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END LIMIT 1""",
+                (app_id, app_id.removeprefix("app_"), app_id.removeprefix("app_"), app_id),
             ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
@@ -215,16 +217,19 @@ class ApplicationRepository:
                 return dict(row) if row else None
 
     async def list_runs_by_application(self, application_id: str) -> List[Dict[str, Any]]:
+        application = await ApplicationRepository(self.db_path).get_application(application_id)
+        if application is None:
+            return []
+        application_id = application["id"]
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
                 SELECT * FROM application_runs 
-                WHERE application_id = ? 
-                   OR application_id IN (SELECT id FROM applications WHERE canonical_job_id = ?)
+                WHERE application_id = ?
                 ORDER BY run_index ASC
                 """,
-                (application_id, application_id.removeprefix("app_")),
+                (application_id,),
             ) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
@@ -294,17 +299,20 @@ class CheckpointRepository:
             await db.commit()
 
     async def get_latest_checkpoint(self, application_id: str) -> Optional[Dict[str, Any]]:
+        application = await ApplicationRepository(self.db_path).get_application(application_id)
+        if application is None:
+            return None
+        application_id = application["id"]
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
                 SELECT * FROM application_checkpoints
-                WHERE application_id = ? 
-                   OR application_id IN (SELECT id FROM applications WHERE canonical_job_id = ?)
+                WHERE application_id = ?
                 ORDER BY created_at DESC, rowid DESC
                 LIMIT 1
                 """,
-                (application_id, application_id.removeprefix("app_")),
+                (application_id,),
             ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None

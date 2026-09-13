@@ -7,7 +7,7 @@
 *One profile. Every application.*
 
 [![Python](https://img.shields.io/badge/Python-%3E%3D3.11-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/Tests-305%20Passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-344%20Passed-brightgreen.svg)](tests/)
 [![Architecture](https://img.shields.io/badge/Design-Local--first-orange.svg)](docs/superpowers/specs/2026-09-12-apply-pilot-v0.1-design.md)
 
 </div>
@@ -26,9 +26,9 @@ ApplyPilot 从本地候选人档案读取资料，通过 Playwright 辅助填写
 | 就绪检查 | 当前可见阶段的必填项检查；填写失败或人工补填后仍不满足要求时暂停 |
 | 北森 | 识别部分阶段标记和“下一步”按钮，验证阶段变化；识别最终提交按钮并停下 |
 | Moka / 通用 | 基础控件填充；目前按单页处理，尚无可靠的页面类型与最终阶段识别 |
-| 复杂组件 | 院校弹窗、搜索下拉只有初步实现；级联、日期组件、动态重复经历尚未完整支持 |
+| 复杂组件 | 院校弹窗、搜索下拉只有初步实现；级联、自定义日期弹窗、动态重复经历尚未完整支持；原生 date/month 已支持，缺失精度时暂停而不补造日期 |
 | 跟踪 | SQLite 保存申请、执行轮次、阶段快照、审计事件；CLI 可查询记录 |
-| 恢复与提交后状态 | 保存了 checkpoint，但可靠的跨进程恢复、重复申请去重、提交结果确认尚未实现 |
+| 恢复与提交后状态 | 支持 `apply resume` 重新打开 checkpoint 的实际 URL 并扫描；候选人、岗位、周期隔离；提交结果确认尚未实现 |
 
 `CandidateProfile` 是事实来源，`ResumeVariant` 是展示与选择的数据模型。当前 CLI 尚未提供变体选择、简历导出和纠错记忆编辑命令。自动提取的资料仍需人工核实，结构校验不能证明事实正确。
 
@@ -45,7 +45,7 @@ uv sync
 uv run playwright install chromium
 ```
 
-项目声明 Python >= 3.11；最近一次完整测试在 Python 3.13 和 3.14 上均为 305 项通过。
+项目声明 Python >= 3.11；最近一次完整测试在 Python 3.13 和 3.14 上均为 344 项通过。
 
 ### 2. 统一资料目录
 
@@ -91,7 +91,7 @@ assets:
     title: 求职简历
 ```
 
-请核对文件路径和类型。当前附件回退逻辑存在误选其他附件的已知问题，详见审查记录。
+请核对文件路径和类型。默认简历 ID 不存在时，仅在有且只有一个明确标为 `resume_pdf` / `resume` 的附件时回退；多个简历必须通过明确的附件 ID 选择，不会根据目录或文件名猜测类型。
 
 ### 4. 校验资料并运行
 
@@ -113,7 +113,7 @@ uv run applypilot apply run -u "https://目标招聘网站/实际表单地址"
 
 终端补填目前仅适合普通文本控件；数组路径（如某段教育经历）不支持自动回写，下拉框和文件上传等请在浏览器处理。JSON 档案回写会保留 JSON 格式。
 
-`READY_REVIEW` 目前不能证明已到达真实站点的最终提交页，也不能证明全部资料正确。尤其是 Moka/通用适配器，在登录页或未加载出表单时可能误报此状态。`--headless` 不适合需要浏览器人工接管的流程。
+`READY_REVIEW` 目前不能证明已到达真实站点的最终提交页，也不能证明全部资料正确。未识别到终审页或无法翻页时会暂停，仍需用户核对真实站点的审核页面。`--headless` 不适合需要浏览器人工接管的流程。
 
 ### 5. 查看记录
 
@@ -123,7 +123,13 @@ uv run applypilot track list -s paused
 uv run applypilot track status app_xxx
 ```
 
-这些命令提供查询功能。当前没有 `resume` 命令，也没有“标记已提交”命令；重新执行同一 URL 会创建新的岗位标识，不能据此恢复原申请。
+恢复已暂停申请：
+
+```bash
+uv run applypilot apply resume app_xxx -p "$APPLYPILOT_HOME/profile.yaml"
+```
+
+恢复前校验候选人归属、申请状态和 checkpoint，保留招聘周期，并重新打开保存的实际页面 URL、重新扫描。相同 URL 保持岗位 ID 稳定，`#/job/...` 路由参与身份计算。旧版本生成的随机岗位 ID 不会自动迁移；尚无“标记已提交”命令。页面仅存在内存中的步骤状态无法通过 URL 重建时，需要人工重新进入对应步骤。
 
 ## CLI 参考
 
@@ -168,7 +174,7 @@ APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run pytest tests/integration/ -q
 APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run --isolated --python 3.13 --locked pytest -q
 ```
 
-当前共有 305 项测试，其中 19 项为本轮新增回归测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
+当前共有 344 项测试，其中包含真实浏览器表单回归、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
 
 测试通过说明已覆盖的行为符合断言，不代表真实招聘站点全功能兼容。后续重点包括上下文映射、附件类型约束、登录与页面识别、可恢复申请状态机，以及真实平台组件适配。
 

@@ -190,7 +190,7 @@ class ValueResolver:
                         for item in curr:
                             rel = str(_get_val(item, "relation") or "")
                             item_id = str(_get_val(item, "id") or "")
-                            if any(t == rel or t in rel for t in targets) or item_id in targets:
+                            if any(t == rel for t in targets) or item_id in targets:
                                 matched = item
                                 break
                         if matched is not None:
@@ -242,19 +242,9 @@ class ValueResolver:
 
                                         fallback_asset = None
                                         if is_resume_request:
-                                            # 1. Look for asset with asset_type == "resume_pdf" or "resume"
-                                            for item in curr:
-                                                atype = str(_get_val(item, "asset_type") or "").lower()
-                                                if atype in ("resume_pdf", "resume"):
-                                                    fallback_asset = item
-                                                    break
-                                            # 2. Look for asset whose file_path contains resume keywords AND ends with .pdf
-                                            if fallback_asset is None:
-                                                for item in curr:
-                                                    fp = str(_get_val(item, "file_path") or "").lower()
-                                                    if any(k in fp for k in ("resume", "cv", "简历")) and fp.endswith(".pdf"):
-                                                        fallback_asset = item
-                                                        break
+                                            candidates = [item for item in curr
+                                                if str(_get_val(item, "asset_type") or "").lower() in ("resume_pdf", "resume")]
+                                            fallback_asset = candidates[0] if len(candidates) == 1 else None
                                             # Strictly return matching resume or None. Never pick arbitrary PDF!
                                             curr = fallback_asset
                                             if curr is None:

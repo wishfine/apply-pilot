@@ -76,6 +76,7 @@ async def form(tmp_path, monkeypatch):
 async def test_native_select_uses_selection(form):
     page, run, _ = form
     await page.set_content('<select aria-label="性别" required><option value="">请选择</option><option value="male">男</option></select>')
+    await page.evaluate("document.body.insertAdjacentHTML('beforeend', '<button>提交申请</button>')")
     status, _ = await run({'identity': {'gender': 'male'}})
     assert await page.locator('select').input_value() == 'male'
     assert status == ApplicationStatus.READY_REVIEW
@@ -85,6 +86,7 @@ async def test_native_select_uses_selection(form):
 async def test_radio_checks_matching_option(form):
     page, run, _ = form
     await page.set_content('<input name="性别" type="radio" value="male" required><input name="性别" type="radio" value="female" required>')
+    await page.evaluate("document.body.insertAdjacentHTML('beforeend', '<button>提交申请</button>')")
     status, _ = await run({'identity': {'gender': 'male'}})
     assert await page.locator('[value=male]').is_checked()
     assert not await page.locator('[value=female]').is_checked()
@@ -167,6 +169,7 @@ async def test_manual_resolution_is_rechecked(form):
 async def test_manual_resolution_filled_page_proceeds(form):
     page, run, _ = form
     await page.set_content('<input aria-label="手机号" required>')
+    await page.evaluate("document.body.insertAdjacentHTML('beforeend', '<button>提交申请</button>')")
     async def resolve(*args):
         await page.locator('input').fill('13800138000')
         return True
@@ -196,6 +199,7 @@ async def test_existing_checked_checkbox_is_not_toggled_off(form):
 async def test_textarea_uses_text_filler(form):
     page, run, _ = form
     await page.set_content('<textarea aria-label="姓名" required></textarea>')
+    await page.evaluate("document.body.insertAdjacentHTML('beforeend', '<button>提交申请</button>')")
     status, _ = await run({'identity': {'name': '测试甲'}})
     assert await page.locator('textarea').input_value() == '测试甲'
     assert status == ApplicationStatus.READY_REVIEW
@@ -219,6 +223,7 @@ async def test_beisen_only_fills_visible_stage(form):
 async def test_hidden_upload_with_visible_label_is_filled(form, tmp_path):
     page, run, _ = form
     await page.set_content('<label for="resume">* 上传简历</label><input id="resume" type="file" style="display:none" required>')
+    await page.evaluate("document.body.insertAdjacentHTML('beforeend', '<button>提交申请</button>')")
     asset = tmp_path / 'resume.pdf'
     asset.write_bytes(b'%PDF-1.4\n% synthetic upload fixture\n')
     status, _ = await run({'assets': [{'asset_id': 'asset_resume_pdf', 'asset_type': 'resume_pdf', 'file_path': str(asset), 'title': 'Fixture'}]})

@@ -12,6 +12,7 @@ from applypilot.storage.database import init_db
 @pytest.mark.asyncio
 async def test_generic_and_moka_is_final_review_rejects_empty_page():
     mock_page = AsyncMock()
+    mock_page.url = AsyncMock(return_value="https://example.test/form")
     # Mock execute_unsafe_script returning False (no submit buttons found)
     mock_page.execute_unsafe_script = AsyncMock(return_value=False)
 
@@ -25,6 +26,7 @@ async def test_generic_and_moka_is_final_review_rejects_empty_page():
 @pytest.mark.asyncio
 async def test_generic_is_final_review_detects_submit_button():
     mock_page = AsyncMock()
+    mock_page.url = AsyncMock(return_value="https://example.test/form")
     # Mock execute_unsafe_script returning True when submit button exists
     mock_page.execute_unsafe_script = AsyncMock(return_value=True)
 
@@ -39,6 +41,7 @@ async def test_engine_pauses_on_login_page_without_false_ready_review(tmp_path: 
 
     mock_browser = AsyncMock()
     mock_page = AsyncMock()
+    mock_page.url = AsyncMock(return_value="https://example.test/form")
     mock_browser.open_page.return_value = mock_page
     mock_browser.wait_for_user = AsyncMock()
 

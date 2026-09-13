@@ -114,7 +114,10 @@ class PlaywrightElement:
                     observed = el.files.length ? Array.from(el.files, f => f.name).join(', ') : null;
                 }
                 if (required) attrs.required = '';
-                return {tag: el.tagName.toLowerCase(), type: el.type || '', label,
+                const group = el.closest('fieldset, section, [role="group"]');
+                const sectionTitle = group?.querySelector(':scope > legend, :scope > h2, :scope > h3, :scope > h4')?.textContent?.trim()
+                    || group?.getAttribute('aria-label') || '';
+                return {section_title: sectionTitle, tag: el.tagName.toLowerCase(), type: el.type || '', label,
                     field_sig: el.id || el.name || label, element_attrs: attrs,
                     outer_html: (container || el).outerHTML, observed_value: observed,
                     is_active: !!active, is_valid: el.validity ? el.validity.valid : true};

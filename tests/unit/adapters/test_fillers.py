@@ -584,7 +584,7 @@ def test_value_resolver_assets_fallback_by_pdf_extension():
         ],
     )
     val = ValueResolver.resolve(profile, None, "assets[asset_resume_pdf].file_path")
-    assert val == "/path/to/my_resume.pdf"
+    assert val is None
 
 
 def test_value_resolver_assets_strictly_rejects_non_resume_fallback():

@@ -47,6 +47,7 @@ def _create_sample_target(provider: str | None = "generic") -> ApplicationTarget
 def _create_mock_browser_and_page():
     mock_browser = AsyncMock()
     mock_page = AsyncMock()
+    mock_page.execute_unsafe_script = AsyncMock(return_value=True)
     mock_browser.open_page.return_value = mock_page
     mock_browser.wait_for_user = AsyncMock()
     return mock_browser, mock_page

@@ -231,7 +231,8 @@ def _canonical_job_id_from_url(url: str) -> str:
     netloc = parsed.netloc.lower()
     path = parsed.path.rstrip("/")
     query = f"?{parsed.query}" if parsed.query else ""
-    norm = f"{netloc}{path}{query}"
+    fragment = f"#{parsed.fragment}" if parsed.fragment else ""
+    norm = f"{netloc}{path}{query}{fragment}"
     url_hash = hashlib.sha256(norm.encode("utf-8")).hexdigest()[:12]
     return f"job_{url_hash}"
 
@@ -501,6 +502,13 @@ def apply_resume(
             console.print(f"[bold red]Application with ID '{application_id}' not found.[/bold red]")
             raise typer.Exit(code=1)
 
+        if app_data["candidate_id"] != profile.profile_id:
+            raise ValueError("Profile does not belong to this application")
+        if not chk_data or not chk_data.get("page_url"):
+            raise ValueError("No resumable checkpoint exists for this application")
+        if app_data["status"] not in ("paused", "in_progress", "ready_review"):
+            raise ValueError("Application status does not permit resume")
+
         canon_job_id = app_data.get("canonical_job_id") or "resumed_job"
         resume_url = (chk_data.get("page_url") if chk_data else None) or "about:blank"
 
@@ -511,6 +519,7 @@ def apply_resume(
             title=app_data.get("job_title") or f"Application {canon_job_id}",
             company_name=app_data.get("company_name") or "target_company",
             description_raw="Resumed application via ApplyPilot CLI",
+            recruitment_cycle=app_data.get("recruitment_cycle"),
             source_channel="url",
             source_url=resume_url,
             apply_url=resume_url,

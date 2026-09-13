@@ -35,7 +35,7 @@ def test_date_input_filler_format_date():
 
     # PartialDate year-month
     p_ym = PartialDate(year=2018, month=9)
-    assert DateInputFiller.format_date_value(p_ym, "date") == "2018-09-01"
+    assert DateInputFiller.format_date_value(p_ym, "date") == ""
     assert DateInputFiller.format_date_value(p_ym, "month") == "2018-09"
 
     # String variations

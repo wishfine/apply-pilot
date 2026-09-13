@@ -168,7 +168,7 @@ class ApplyEngine:
             if existing_app:
                 app_id = existing_app["id"]
             else:
-                app_id = f"app_{profile.profile_id}_{target.job.job_id}"
+                app_id = "app_" + hashlib.sha256(app_key.encode()).hexdigest()[:24]
                 await self.app_repo.create_application(
                     app_id=app_id,
                     application_key=app_key,
@@ -297,6 +297,11 @@ class ApplyEngine:
                     if hasattr(adapter, "detect_stage")
                     else "single_page"
                 )
+
+                if callable(getattr(type(page), "url", None)):
+                    actual_url = await page.url()
+                    if actual_url and actual_url != "about:blank":
+                        target_url = actual_url
 
                 snap_id = f"snap_{uuid.uuid4().hex[:12]}"
                 await self.snap_repo.save_snapshot(
@@ -454,7 +459,7 @@ class ApplyEngine:
                             map_res = self.mapper.map_field(
                                 field_sig=field_sig,
                                 normalized_label=label,
-                                section_title=current_stage,
+                                section_title=(live_state.get("section_title") or current_stage) if live_state else current_stage,
                                 field_type=field_type,
                                 correction_memories=corrections,
                             )
@@ -694,8 +699,7 @@ class ApplyEngine:
                 if hasattr(adapter, "advance"):
                     advanced = await adapter.advance(page, current_stage)
                 if not advanced:
-                    completed_normally = True
-                    break
+                    return await self._pause_application(app_id, run_id, target_url, current_stage, snap_id)
 
             if not completed_normally:
                 await self.app_repo.update_run_status(
