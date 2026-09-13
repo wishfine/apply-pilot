@@ -939,23 +939,11 @@ class GenericApplicationAdapter(BaseApplicationAdapter):
         result = await page.execute_unsafe_script(
             "Detect final submission control without clicking it",
             """() => Array.from(document.querySelectorAll('button, input[type=submit], input[type=button]'))
-                .some(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden'
+                .some(el => el.getClientRects().length && !el.disabled && el.getAttribute('aria-disabled') !== 'true'
+                    && getComputedStyle(el).visibility !== 'hidden'
                     && /^(提交|提交申请|确认提交|提交简历|确认并提交|立即提交|Submit|Submit application)$/i.test((el.textContent || el.value || '').trim()))""",
         )
         return result is True
 
     async def is_login_page(self, page: Any) -> bool:
-        if not page or not hasattr(page, "execute_unsafe_script"):
-            return False
-        result = await page.execute_unsafe_script(
-            "Detect login page signals",
-            """() => {
-                const text = (document.body ? document.body.innerText : '') || '';
-                const hasLoginText = /(请先登录|扫码登录|微信扫码|账号密码登录|短信登录|登录后投递|立即登录|验证码登录|请登录)/i.test(text);
-                const hasLoginInput = !!document.querySelector('input[type=password], input[name*=password], input[name*=pwd], input[placeholder*=密码], input[placeholder*=验证码]');
-                const formInputs = Array.from(document.querySelectorAll('input:not([type=hidden]):not([type=password]), select, textarea'))
-                    .filter(el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden');
-                return (hasLoginText || hasLoginInput) && formInputs.length <= 2;
-            }""",
-        )
-        return result is True
+        return await super().is_login_page(page)

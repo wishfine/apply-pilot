@@ -233,19 +233,19 @@ class ResumeIngestionService:
     @staticmethod
     def _normalize_profile_dict(profile_dict: dict) -> dict:
         """Defensively normalize common LLM key discrepancies before domain validation."""
-        if not profile_dict.get("profile_id"):
-            # Keep the generated ID stable for identical extracted facts while
-            # avoiding the old global ``cand_profile`` collision between
-            # candidates imported into the same local database.
-            seed = dict(profile_dict)
-            seed.pop("profile_id", None)
-            if any(value not in (None, "", [], {}, ()) for value in seed.values()):
-                digest = hashlib.sha256(
-                    json.dumps(seed, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-                ).hexdigest()[:16]
-            else:
-                digest = uuid.uuid4().hex[:16]
-            profile_dict["profile_id"] = f"cand_{digest}"
+        # The profile id is derived from the extracted facts rather than
+        # trusting an identifier invented by the model.  Otherwise two
+        # unrelated resumes can both be returned as e.g. ``cand_001`` and
+        # share application history.
+        seed = dict(profile_dict)
+        seed.pop("profile_id", None)
+        if any(value not in (None, "", [], {}, ()) for value in seed.values()):
+            digest = hashlib.sha256(
+                json.dumps(seed, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()[:16]
+        else:
+            digest = uuid.uuid4().hex[:16]
+        profile_dict["profile_id"] = f"cand_{digest}"
 
         for idx, exp in enumerate(profile_dict.get("experiences", [])):
             if not isinstance(exp, dict):

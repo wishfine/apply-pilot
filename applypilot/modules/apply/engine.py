@@ -29,7 +29,11 @@ from applypilot.domain.profile import CandidateProfile
 from applypilot.domain.variant import DisclosurePolicy, ResumeVariant
 from applypilot.modules.apply.mapper import FieldMapper
 from applypilot.modules.apply.normalizer import ValueKind, ValueNormalizerRegistry
-from applypilot.modules.apply.readiness import FormRequirementDetector, ReadinessAuditor
+from applypilot.modules.apply.readiness import (
+    FormRequirementDetector,
+    ReadinessAuditor,
+    _is_meaningful_value,
+)
 from applypilot.modules.profile.resolver import ValueResolver
 from applypilot.storage.repositories import (
     ApplicationRepository,
@@ -110,7 +114,13 @@ class ApplyEngine:
             return ValueKind.EMAIL
         return ValueKind.PLAIN_TEXT
 
-    def _check_disclosure(self, policy: Optional[DisclosurePolicy], path: str) -> bool:
+    def _check_disclosure(
+        self,
+        policy: Optional[DisclosurePolicy],
+        path: str,
+        resolved_value: Any = None,
+        profile: Optional[CandidateProfile] = None,
+    ) -> bool:
         """Evaluate path against disclosure gate policy. Defaults to strict policy when None."""
         effective_policy = policy if policy is not None else DisclosurePolicy()
         for blocked_path in effective_policy.blocked_field_paths:
@@ -127,7 +137,56 @@ class ApplyEngine:
             return False
         if not effective_policy.allow_sensitive and ("id_number" in path or "secret" in path):
             return False
+        if not effective_policy.allow_sensitive and path.startswith("assets[") and profile is not None:
+            for asset in profile.assets:
+                if str(asset.file_path) == str(resolved_value) and asset.sensitivity in (
+                    SensitivityLevel.SENSITIVE,
+                    SensitivityLevel.SECRET,
+                ):
+                    return False
         return True
+
+    @staticmethod
+    def _snapshot_field_metadata(fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Keep form structure useful for audit without persisting field values."""
+        safe_attrs = {"id", "name", "type", "required", "aria-required", "class"}
+        safe_keys = {
+            "field_sig",
+            "label",
+            "section_title",
+            "is_required",
+            "mapped_path",
+            "value_kind",
+            "fill_failed",
+            "disclosure_blocked",
+            "tag",
+            "type",
+            "options",
+            "structure_signature",
+        }
+        result: list[dict[str, Any]] = []
+        for field in fields:
+            item = {key: field.get(key) for key in safe_keys if key in field}
+            attrs = field.get("element_attrs")
+            if isinstance(attrs, dict):
+                item["element_attrs"] = {
+                    key: value for key, value in attrs.items() if key in safe_attrs
+                }
+            result.append(item)
+        return result
+
+    @staticmethod
+    def _mark_unmatched_option_groups(fields: list[dict[str, Any]]) -> None:
+        """Turn an option group with no matching candidate value into a conflict."""
+        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for field in fields:
+            if field.get("option_unmatched"):
+                key = (str(field.get("field_sig") or ""), str(field.get("type") or ""))
+                groups.setdefault(key, []).append(field)
+        for group in groups.values():
+            if not any(_is_meaningful_value(field.get("observed_value")) for field in group):
+                for field in group:
+                    field["fill_failed"] = True
 
     @staticmethod
     async def _live_field(element: Any) -> Optional[dict[str, Any]]:
@@ -168,7 +227,16 @@ class ApplyEngine:
                     "Detect login page signals",
                     """() => {
                         const text = (document.body ? document.body.innerText : '') || '';
-                        return /(请先登录|扫码登录|微信扫码|账号密码登录|短信登录|登录后投递|立即登录|验证码登录|请登录)/i.test(text);
+                        const strongLoginText = /(请先登录|扫码登录|微信扫码|账号密码登录|短信登录|登录后投递|验证码登录)/i.test(text);
+                        const visible = el => !!el.getClientRects().length
+                            && getComputedStyle(el).visibility !== 'hidden';
+                        const authInputs = Array.from(document.querySelectorAll(
+                            'input[type=password], input[name*=password], input[name*=pwd], input[placeholder*=密码], input[placeholder*=验证码]'
+                        )).filter(visible);
+                        const loginFormButton = Array.from(document.querySelectorAll(
+                            'form button, form input[type=submit], [role=dialog] button, [role=dialog] input[type=submit]'
+                        )).some(el => visible(el) && /登录|sign in|log in/i.test((el.textContent || el.value || '').trim()));
+                        return strongLoginText || authInputs.length > 0 || loginFormButton;
                     }""",
                 )
                 return result is True
@@ -195,6 +263,7 @@ class ApplyEngine:
             "is_required": bool(required),
             "option_label": state.get("option_label"),
             "options": state.get("options"),
+            "widget": state.get("widget"),
         }
         return json.dumps(descriptor, ensure_ascii=False, sort_keys=True, default=str)
 
@@ -216,7 +285,7 @@ class ApplyEngine:
                     fallback_state: dict[str, Any] = {}
                     if hasattr(element, "get_attribute"):
                         attrs: dict[str, Any] = {}
-                        for attr in ("id", "name", "aria-label", "placeholder", "title", "type", "required", "aria-required"):
+                        for attr in ("id", "name", "aria-label", "placeholder", "title", "type", "required", "aria-required", "data-widget", "data-component", "class"):
                             value = await element.get_attribute(attr)
                             attrs[attr] = value
                         fallback_state["element_attrs"] = {
@@ -236,6 +305,7 @@ class ApplyEngine:
                                 break
                     fallback_state["field_sig"] = signature or f"unnamed-{index}"
                     fallback_state["options"] = None
+                    fallback_state["widget"] = attrs.get("data-widget") or attrs.get("data-component") or attrs.get("class")
                     signature = self._descriptor_signature(fallback_state)
                 signatures.append(str(signature or f"unnamed-{index}"))
             except Exception:
@@ -271,6 +341,7 @@ class ApplyEngine:
     ) -> ApplicationStatus:
         """Execute the multi-stage form application state machine for a target job."""
         run_id: Optional[str] = None
+        run_created = False
         app_id: Optional[str] = None
         target_url = target.final_form_url or target.job.apply_url
         current_stage: Optional[str] = None
@@ -377,6 +448,7 @@ class ApplyEngine:
                 run_mode="semi_auto",
                 browser_session_id="local",
             )
+            run_created = True
 
             await self.event_repo.append_event(
                 event_id=f"evt_{uuid.uuid4().hex[:12]}",
@@ -391,6 +463,9 @@ class ApplyEngine:
             latest_chk = await self.chk_repo.get_latest_checkpoint(app_id)
             if latest_chk:
                 resumed_stage = latest_chk.get("stage_key")
+                checkpoint_url = latest_chk.get("page_url")
+                if checkpoint_url:
+                    target_url = str(checkpoint_url)
                 await self.event_repo.append_event(
                     event_id=f"evt_{uuid.uuid4().hex[:12]}",
                     run_id=run_id,
@@ -425,6 +500,9 @@ class ApplyEngine:
                     "generic", next(iter(self.adapters.values()))
                 )
 
+            if run_created:
+                await self.app_repo.update_run_adapter(run_id, current_platform)
+
             parsed_target_url = urlparse(target_url)
             tenant_hint = parsed_target_url.netloc.lower() or None
             corrections = await self.corr_repo.lookup_corrections(
@@ -442,6 +520,9 @@ class ApplyEngine:
                     await adapter.detect_stage(page)
                     if hasattr(adapter, "detect_stage")
                     else "single_page"
+                )
+                await self.app_repo.update_status(
+                    app_id, ApplicationStatus.IN_PROGRESS, current_stage=current_stage
                 )
 
                 if callable(getattr(type(page), "url", None)):
@@ -559,6 +640,13 @@ class ApplyEngine:
                                         pass
 
                                 label = aria_label or title_attr or name_attr or placeholder or id_attr or ""
+                                widget = None
+                                if hasattr(element, "get_attribute"):
+                                    widget = (
+                                        await element.get_attribute("data-widget")
+                                        or await element.get_attribute("data-component")
+                                        or await element.get_attribute("class")
+                                    )
                                 tag_str = str(tag_name).strip().lower() if tag_name else ""
                                 type_str = str(type_attr).strip().lower() if type_attr else ""
 
@@ -625,8 +713,18 @@ class ApplyEngine:
                             path, method, conf = map_res
 
                             mapping_id = f"map_{uuid.uuid4().hex[:12]}"
+                            resolved_expected = (
+                                self.resolver.resolve(profile, variant, path)
+                                if path
+                                else None
+                            )
                             disclosure_allowed = (
-                                self._check_disclosure(target.disclosure_policy, path)
+                                self._check_disclosure(
+                                    target.disclosure_policy,
+                                    path,
+                                    resolved_value=resolved_expected,
+                                    profile=profile,
+                                )
                                 if path
                                 else False
                             )
@@ -650,8 +748,14 @@ class ApplyEngine:
                             expected = None
                             kind = ValueKind.PLAIN_TEXT
                             fill_failed = False
+                            option_unmatched = False
+                            disclosure_blocked = (
+                                bool(path)
+                                and not disclosure_allowed
+                                and _is_meaningful_value(observed)
+                            )
                             if path and disclosure_allowed:
-                                expected = self.resolver.resolve(profile, variant, path)
+                                expected = resolved_expected
                                 if expected is not None:
                                     kind = self._infer_value_kind(path)
                                     if not ValueNormalizerRegistry.are_equivalent(
@@ -665,6 +769,7 @@ class ApplyEngine:
                                                 "field_sig": field_sig,
                                                 "label": label,
                                                 "option_label": live_state.get("option_label") if live_state else None,
+                                                "widget": live_state.get("widget") if live_state else widget,
                                                 "type": type_str,
                                                 "tag": tag_str,
                                             },
@@ -673,6 +778,7 @@ class ApplyEngine:
                                         action_type = str(getattr(res, "action_type", "type_text"))
                                         status_str = "success" if getattr(res, "success", True) else "failed"
                                         fill_failed = not getattr(res, "success", True)
+                                        option_unmatched = action_type == "skip_mismatched_option"
                                         after_fill = await self._live_field(element)
                                         obs_raw = (after_fill["observed_value"] if after_fill is not None
                                                    else getattr(res, "observed_value", None))
@@ -723,9 +829,12 @@ class ApplyEngine:
                                 "expected_value": expected,
                                 "value_kind": kind,
                                 "fill_failed": fill_failed,
+                                "option_unmatched": option_unmatched,
+                                "disclosure_blocked": disclosure_blocked,
                                 "tag": tag_str,
                                 "type": type_str,
                                 "options": live_state.get("options") if live_state else None,
+                                "widget": live_state.get("widget") if live_state else widget,
                                 "structure_signature": self._descriptor_signature(
                                     {
                                         "field_sig": field_sig,
@@ -736,6 +845,7 @@ class ApplyEngine:
                                         "is_required": is_required,
                                         "option_label": live_state.get("option_label") if live_state else None,
                                         "options": live_state.get("options") if live_state else None,
+                                        "widget": live_state.get("widget") if live_state else widget,
                                     }
                                 ),
                             })
@@ -759,7 +869,7 @@ class ApplyEngine:
                 await self.snap_repo.update_snapshot(
                     snapshot_id=snap_id,
                     dom_fingerprint=dom_fingerprint,
-                    fields_meta_json=stage_scanned_fields,
+                    fields_meta_json=self._snapshot_field_metadata(stage_scanned_fields),
                 )
 
                 # Re-read all controls after filling, including radio groups.
@@ -822,6 +932,7 @@ class ApplyEngine:
                     )
 
                 # Stage readiness diagnostics and interactive resolution
+                self._mark_unmatched_option_groups(stage_scanned_fields)
                 report = ReadinessAuditor.audit_fields(
                     stage_scanned_fields, profile, variant
                 )
@@ -868,6 +979,7 @@ class ApplyEngine:
 
                 if not report.is_ready:
                     await self._refresh_readiness(stage_scanned_fields, scanned_elements)
+                    self._mark_unmatched_option_groups(stage_scanned_fields)
                     if await self._field_structure_changed(page, stage_scanned_fields):
                         continue
                     report = ReadinessAuditor.audit_fields(stage_scanned_fields, profile, variant)
@@ -952,34 +1064,54 @@ class ApplyEngine:
             return ApplicationStatus.READY_REVIEW
 
         except Exception as e:
-            if run_id is not None:
-                run_rec = await self.app_repo.get_run(run_id)
-                if not run_rec or run_rec.get("status") != "failed":
-                    await self.app_repo.update_run_status(
-                        run_id, status="failed", end_reason=str(e)
-                    )
-                    await self.event_repo.append_event(
-                        event_id=f"evt_{uuid.uuid4().hex[:12]}",
-                        run_id=run_id,
-                        event_type="RUN_FAILED",
-                        payload_json={"error": str(e)},
-                    )
-                if app_id is not None:
+            # Preserve the original exception even if diagnostic persistence
+            # itself fails.  A run id is only valid after create_run commits.
+            if run_created and run_id is not None:
+                try:
+                    run_rec = await self.app_repo.get_run(run_id)
+                    if not run_rec or run_rec.get("status") != "failed":
+                        await self.app_repo.update_run_status(
+                            run_id, status="failed", end_reason=str(e)
+                        )
+                        try:
+                            await self.event_repo.append_event(
+                                event_id=f"evt_{uuid.uuid4().hex[:12]}",
+                                run_id=run_id,
+                                event_type="RUN_FAILED",
+                                payload_json={
+                                    "error_type": type(e).__name__,
+                                    "error_code": getattr(e, "error_code", None),
+                                },
+                            )
+                        except Exception:
+                            logger.exception("Failed to persist RUN_FAILED event")
+                except Exception:
+                    logger.exception("Failed to persist failed run status")
+
+            if app_id is not None:
+                try:
                     app_rec = await self.app_repo.get_application(app_id)
                     if app_rec and app_rec.get("status") == ApplicationStatus.IN_PROGRESS:
                         await self.app_repo.update_status(
-                            app_id, ApplicationStatus.PAUSED,
-                            current_stage=app_rec.get("current_stage"),
+                            app_id,
+                            ApplicationStatus.PAUSED,
+                            current_stage=current_stage or app_rec.get("current_stage"),
                         )
-                        await self.chk_repo.save_checkpoint(
-                            checkpoint_id=f"chk_{uuid.uuid4().hex[:12]}",
-                            application_id=app_id,
-                            run_id=run_id,
-                            page_url=target_url,
-                            stage_key=current_stage or "error",
-                            snapshot_id=None,
-                            status="paused",
-                        )
+                        if run_created and run_id is not None:
+                            try:
+                                await self.chk_repo.save_checkpoint(
+                                    checkpoint_id=f"chk_{uuid.uuid4().hex[:12]}",
+                                    application_id=app_id,
+                                    run_id=run_id,
+                                    page_url=target_url,
+                                    stage_key=current_stage or "error",
+                                    snapshot_id=None,
+                                    status="paused",
+                                )
+                            except Exception:
+                                logger.exception("Failed to persist recovery checkpoint")
+                except Exception:
+                    logger.exception("Failed to pause application after error")
             raise
 
 

@@ -201,6 +201,7 @@ class ReadinessAuditor:
                     value_kind, str(observed_value), expected_value
                 )
             fill_failed = bool(field.get("fill_failed"))
+            disclosure_blocked = bool(field.get("disclosure_blocked"))
 
             # Native/custom browser validity is a hard safety signal even for
             # optional controls.  An invalid value must never be presented as
@@ -208,9 +209,11 @@ class ReadinessAuditor:
             invalid_value = field.get("is_valid") is False
 
             # Determine status
-            if invalid_value or fill_failed or expected_mismatch:
+            if disclosure_blocked or invalid_value or fill_failed or expected_mismatch:
                 status = FieldReadinessStatus.CONFLICT
-                if invalid_value:
+                if disclosure_blocked:
+                    suggested_fix = f"'{label}' 当前已有值，但该字段被披露策略禁止，请在浏览器中清除或确认后再继续"
+                elif invalid_value:
                     suggested_fix = f"'{label}' 当前值未通过网页校验，请在浏览器中修正"
                 elif fill_failed:
                     suggested_fix = f"自动填写 '{label}' 未成功，请在浏览器中核对并手动处理"

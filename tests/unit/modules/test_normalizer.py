@@ -252,6 +252,14 @@ class TestDateNormalizer:
             is False
         )
 
+    def test_invalid_calendar_date_is_not_equivalent_to_partial_date(self):
+        assert (
+            ValueNormalizerRegistry.are_equivalent(
+                ValueKind.DATE, "2023-02-31", "2023-02"
+            )
+            is False
+        )
+
 
 class TestPhoneNormalizer:
     """Verify phone normalization with country code and delimiters."""
@@ -621,4 +629,3 @@ class TestRegistryCustomExtensionAndRobustness:
         assert ValueNormalizerRegistry.are_equivalent(
             ValueKind.PERSON_NAME, "买买提•艾山", "买买提·艾山"
         )
-

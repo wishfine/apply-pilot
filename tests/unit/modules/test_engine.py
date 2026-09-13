@@ -618,3 +618,63 @@ async def test_engine_does_not_restart_submitted_application(tmp_path: Path):
         await engine.run_application_target(target, profile)
     app = await engine.app_repo.get_application(app_id)
     assert app["status"] == ApplicationStatus.SUBMITTED
+
+
+@pytest.mark.asyncio
+async def test_failure_before_run_creation_pauses_application(tmp_path: Path):
+    db_file = tmp_path / "early_failure.db"
+    await init_db(db_file)
+    engine = ApplyEngine(db_file, AsyncMock())
+    engine.rev_repo.save_profile_revision = AsyncMock(side_effect=RuntimeError("revision failed"))
+    profile = _create_sample_profile()
+    target = _create_sample_target()
+    with pytest.raises(RuntimeError, match="revision failed"):
+        await engine.run_application_target(target, profile)
+    app = await engine.app_repo.get_application_by_key(
+        f"{profile.profile_id}:{target.job.job_id}:default"
+    )
+    assert app["status"] == ApplicationStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_run_creation_failure_preserves_original_error_and_pauses(tmp_path: Path):
+    db_file = tmp_path / "run_creation_failure.db"
+    await init_db(db_file)
+    engine = ApplyEngine(db_file, AsyncMock())
+    engine.app_repo.create_run = AsyncMock(side_effect=RuntimeError("create run failed"))
+    profile = _create_sample_profile()
+    target = _create_sample_target()
+    with pytest.raises(RuntimeError, match="create run failed"):
+        await engine.run_application_target(target, profile)
+    app = await engine.app_repo.get_application_by_key(
+        f"{profile.profile_id}:{target.job.job_id}:default"
+    )
+    assert app["status"] == ApplicationStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_detected_adapter_name_is_persisted(tmp_path: Path):
+    db_file = tmp_path / "adapter_name.db"
+    await init_db(db_file)
+    browser, page = _create_mock_browser_and_page()
+    page.find_all = AsyncMock(return_value=[])
+    detector = AsyncMock()
+    detector.detect.return_value = DetectionReport(
+        candidates=[DetectionResult(platform="beisen", confidence=1.0)]
+    )
+    adapter = AsyncMock()
+    adapter.detect_stage.return_value = "review"
+    adapter.is_final_review.return_value = True
+    engine = ApplyEngine(
+        db_file,
+        browser,
+        platform_detector=detector,
+        adapters={"beisen": adapter},
+    )
+    target = _create_sample_target(provider=None)
+    await engine.run_application_target(target, _create_sample_profile())
+    app = await engine.app_repo.get_application_by_key(
+        f"cand_test_001:{target.job.job_id}:default"
+    )
+    run = (await engine.app_repo.list_runs_by_application(app["id"]))[0]
+    assert run["adapter_name"] == "beisen"

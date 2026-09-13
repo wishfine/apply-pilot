@@ -7,6 +7,7 @@ from applypilot.domain.job import Job, ApplicationTarget, ApplicationStatus
 from applypilot.domain.profile import CandidateProfile, IdentityInfo, ContactInfo
 from applypilot.modules.apply.engine import ApplyEngine
 from applypilot.storage.database import init_db
+from applypilot.storage.repositories import ApplicationRepository, CheckpointRepository, EventRepository
 
 
 @pytest.mark.asyncio
@@ -95,3 +96,63 @@ async def test_navigation_failure_is_paused_with_resumable_checkpoint(tmp_path: 
     assert app["status"] == ApplicationStatus.PAUSED
     checkpoint = await engine.chk_repo.get_latest_checkpoint(app["id"])
     assert checkpoint["page_url"] == job.apply_url
+
+
+@pytest.mark.asyncio
+async def test_engine_uses_latest_checkpoint_url_when_resuming(tmp_path: Path):
+    db_file = tmp_path / "resume_url.db"
+    await init_db(db_file)
+    browser = AsyncMock()
+    page = AsyncMock()
+    page.url = AsyncMock(return_value="https://example.com/apply/step1")
+    page.find_all = AsyncMock(return_value=[])
+    page.execute_unsafe_script = AsyncMock(return_value=False)
+    browser.open_page.return_value = page
+
+    profile = CandidateProfile(profile_id="cand_resume_url", identity=IdentityInfo(name="测试员"))
+    job = Job(job_id="job_resume_url", title="岗位", company_name="公司", description_raw="desc",
+              source_channel="url", source_url="https://example.com/apply/step1",
+              apply_url="https://example.com/apply/step1")
+    target = ApplicationTarget(target_id="target_resume_url", job=job)
+    app_id = "app_resume_url"
+    app_repo = ApplicationRepository(db_file)
+    await app_repo.create_application(
+        app_id=app_id,
+        application_key=f"{profile.profile_id}:{job.job_id}:default",
+        candidate_id=profile.profile_id,
+        canonical_job_id=job.job_id,
+        company_name=job.company_name,
+        job_title=job.title,
+        status=ApplicationStatus.PAUSED,
+    )
+    from applypilot.storage.repositories import RevisionRepository
+    await RevisionRepository(db_file).save_profile_revision("rev_resume_url", profile.profile_id, "hash", {})
+    await app_repo.create_run("run_resume_url", app_id, 1, "rev_resume_url", "generic", "1", "1", "cfg")
+    await CheckpointRepository(db_file).save_checkpoint(
+        "chk_resume_url", app_id, "run_resume_url", page_url="https://example.com/apply/step2", status="paused"
+    )
+
+    engine = ApplyEngine(db_file, browser, interactive_readiness=False)
+    await engine.run_application_target(target, profile)
+    browser.open_page.assert_awaited_once_with("https://example.com/apply/step2")
+
+
+@pytest.mark.asyncio
+async def test_failure_event_does_not_store_exception_details(tmp_path: Path):
+    db_file = tmp_path / "failure_event.db"
+    await init_db(db_file)
+    browser = AsyncMock()
+    browser.open_page = AsyncMock(side_effect=RuntimeError("candidate secret 110101200001011234"))
+    engine = ApplyEngine(db_file, browser)
+    profile = CandidateProfile(profile_id="cand_failure_event", identity=IdentityInfo(name="测试员"))
+    job = Job(job_id="job_failure_event", title="岗位", company_name="公司", description_raw="desc",
+              source_channel="url", source_url="https://example.com/apply",
+              apply_url="https://example.com/apply")
+    with pytest.raises(RuntimeError, match="candidate secret"):
+        await engine.run_application_target(ApplicationTarget(target_id="target_failure_event", job=job), profile)
+    app = await engine.app_repo.get_application_by_key("cand_failure_event:job_failure_event:default")
+    run = (await engine.app_repo.list_runs_by_application(app["id"]))[0]
+    events = await EventRepository(db_file).list_events_by_run(run["id"])
+    failed = [event for event in events if event["event_type"] == "RUN_FAILED"]
+    assert failed
+    assert "110101200001011234" not in failed[0]["payload_json"]

@@ -18,14 +18,34 @@ from applypilot.adapters.applications.generic import (
     RadioCheckboxFiller,
     StandardInputFiller,
 )
+async def _verify_selected_value(element: Any, expected: str) -> bool:
+    from applypilot.modules.apply.normalizer import ValueKind, ValueNormalizerRegistry
+
+    try:
+        inspect_field = getattr(element, "inspect_field", None)
+        if callable(inspect_field):
+            state = await element.inspect_field()
+            if isinstance(state, dict):
+                observed = state.get("observed_value")
+                if ValueNormalizerRegistry.are_equivalent(ValueKind.PLAIN_TEXT, observed, expected):
+                    return True
+    except Exception:
+        pass
+    try:
+        if hasattr(element, "get_attribute"):
+            observed = await element.get_attribute("value")
+            return ValueNormalizerRegistry.are_equivalent(ValueKind.PLAIN_TEXT, observed, expected)
+    except Exception:
+        pass
+    return False
 
 
 class BeisenModalSchoolPicker:
     """Component filler for Beisen modal school/college selection popups."""
 
     async def can_handle(self, element: Any, field_info: dict) -> bool:
-        field_type = str(field_info.get("field_type", "")).lower()
-        widget = str(field_info.get("widget", "")).lower()
+        field_type = str(field_info.get("field_type", "")).lower().replace("-", "_")
+        widget = str(field_info.get("widget", "")).lower().replace("-", "_")
         return (
             "beisen_modal" in field_type
             or "school_picker" in field_type
@@ -50,6 +70,40 @@ class BeisenModalSchoolPicker:
             if hasattr(element, "click"):
                 await element.click()
 
+            if not hasattr(page, "execute_unsafe_script"):
+                return FillResult(
+                    success=False,
+                    action_type="beisen_modal_pick",
+                    observed_value=None,
+                    verification_status="unverified",
+                    error_code="MODAL_OPTION_NOT_CONFIRMED",
+                    recoverable=True,
+                    needs_human=True,
+                )
+            selected = await page.execute_unsafe_script(
+                "Select and verify Beisen school option",
+                """value => {
+                    const visible = el => !!el.getClientRects().length
+                        && getComputedStyle(el).visibility !== 'hidden';
+                    const selectors = '[role=option], .el-select-dropdown__item, .ant-select-item-option, .school-option, li';
+                    const option = Array.from(document.querySelectorAll(selectors)).find(el =>
+                        visible(el) && (el.textContent || '').trim() === value);
+                    if (!option) return false;
+                    option.click();
+                    return true;
+                }""",
+                val_str,
+            )
+            if selected is not True or not await _verify_selected_value(element, val_str):
+                return FillResult(
+                    success=False,
+                    action_type="beisen_modal_pick",
+                    observed_value=None,
+                    verification_status="unverified",
+                    error_code="MODAL_OPTION_NOT_CONFIRMED",
+                    recoverable=True,
+                    needs_human=True,
+                )
             return FillResult(
                 success=True,
                 action_type="beisen_modal_pick",
@@ -130,7 +184,8 @@ class BeisenApplicationAdapter(BaseApplicationAdapter):
         result = await page.execute_unsafe_script(
             "Detect final submission control without clicking it",
             """() => Array.from(document.querySelectorAll('button, input[type=submit], input[type=button]'))
-                .some(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden'
+                .some(el => el.getClientRects().length && !el.disabled && el.getAttribute('aria-disabled') !== 'true'
+                    && getComputedStyle(el).visibility !== 'hidden'
                     && /^(提交|提交申请|确认提交|提交简历|Submit|Submit application)$/i.test((el.textContent || el.value || '').trim()))""",
         )
         return result is True

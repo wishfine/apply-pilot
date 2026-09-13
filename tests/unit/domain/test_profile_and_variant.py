@@ -119,6 +119,14 @@ def test_candidate_profile_defaults():
     assert profile.fact_metadata == {}
 
 
+def test_candidate_profile_rejects_unknown_nested_fields():
+    with pytest.raises(Exception):
+        CandidateProfile.model_validate({
+            "profile_id": "cand_strict",
+            "contact": {"emial": "user@example.com"},
+        })
+
+
 def test_project_skill_asset_story_records():
     proj = ProjectRecord(
         id="proj_001",
@@ -274,4 +282,3 @@ def test_profile_and_variant_serialization_roundtrip():
     assert recovered.identity.name == "李四"
     assert recovered.education[0].school_name == "北京大学"
     assert recovered.education[0].education_level == EducationLevel.BACHELOR
-

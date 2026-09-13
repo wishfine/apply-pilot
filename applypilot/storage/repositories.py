@@ -265,6 +265,15 @@ class ApplicationRepository:
             )
             await db.commit()
 
+    async def update_run_adapter(self, run_id: str, adapter_name: str) -> None:
+        """Persist the adapter selected after page inspection."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE application_runs SET adapter_name = ? WHERE id = ?",
+                (adapter_name, run_id),
+            )
+            await db.commit()
+
 
 class CheckpointRepository:
     """Repository for managing materialization checkpoints."""

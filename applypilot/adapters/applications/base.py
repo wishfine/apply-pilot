@@ -103,3 +103,25 @@ class BaseApplicationAdapter:
 
     async def is_final_review(self, page: Any) -> bool:
         raise NotImplementedError("Subclasses must implement is_final_review")
+
+    async def is_login_page(self, page: Any) -> bool:
+        """Detect an authentication gate without mistaking a header login link for it."""
+        if not page or not hasattr(page, "execute_unsafe_script"):
+            return False
+        result = await page.execute_unsafe_script(
+            "Detect login page signals",
+            """() => {
+                const visible = el => !!el.getClientRects().length
+                    && getComputedStyle(el).visibility !== 'hidden';
+                const text = (document.body ? document.body.innerText : '') || '';
+                const strongLoginText = /(请先登录|扫码登录|微信扫码|账号密码登录|短信登录|登录后投递|验证码登录)/i.test(text);
+                const authInputs = Array.from(document.querySelectorAll(
+                    'input[type=password], input[name*=password], input[name*=pwd], input[placeholder*=密码], input[placeholder*=验证码]'
+                )).filter(visible);
+                const loginFormButton = Array.from(document.querySelectorAll(
+                    'form button, form input[type=submit], [role=dialog] button, [role=dialog] input[type=submit]'
+                )).some(el => visible(el) && /登录|sign in|log in/i.test((el.textContent || el.value || '').trim()));
+                return strongLoginText || authInputs.length > 0 || loginFormButton;
+            }""",
+        )
+        return result is True

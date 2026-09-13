@@ -2,7 +2,7 @@ import datetime
 import re
 from enum import StrEnum
 from typing import Any, Optional
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TriState(StrEnum):
@@ -13,7 +13,11 @@ class TriState(StrEnum):
     UNKNOWN = "unknown"
 
 
-class PartialDate(BaseModel):
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class PartialDate(_StrictModel):
     """Represents dates with optional month and day granularity."""
 
     year: int
@@ -83,7 +87,7 @@ class LogStrategy(StrEnum):
     OMIT = "omit"
 
 
-class FieldPolicy(BaseModel):
+class FieldPolicy(_StrictModel):
     """Governance and masking policy for a specific field pattern."""
 
     path_pattern: str
@@ -93,7 +97,7 @@ class FieldPolicy(BaseModel):
     requires_confirmation: bool = False
 
 
-class FactMetadata(BaseModel):
+class FactMetadata(_StrictModel):
     """Provenance and audit metadata for candidate facts."""
 
     source: str

@@ -1,9 +1,13 @@
 """Presentation strategies (ResumeVariant) and disclosure policies."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class VariantBullet(BaseModel):
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class VariantBullet(_StrictModel):
     """Resume bullet point tailored for a specific role or variant."""
 
     text: str
@@ -16,7 +20,7 @@ class VariantBullet(BaseModel):
     verified: bool = True
 
 
-class VariantProjectConfig(BaseModel):
+class VariantProjectConfig(_StrictModel):
     """Configuration and tailored bullets for a project in a resume variant."""
 
     project_id: str
@@ -25,7 +29,7 @@ class VariantProjectConfig(BaseModel):
     bullets: list[VariantBullet] = Field(default_factory=list)
 
 
-class ResumeVariant(BaseModel):
+class ResumeVariant(_StrictModel):
     """A tailored resume variant configuration mapped to target job types."""
 
     variant_id: str  # 如 "algo_specialist", "backend_dev"
@@ -38,7 +42,7 @@ class ResumeVariant(BaseModel):
     highlighted_skill_ids: list[str] = Field(default_factory=list)
 
 
-class DisclosurePolicy(BaseModel):
+class DisclosurePolicy(_StrictModel):
     """Per-application disclosure gate policy for sensitive or private data."""
 
     allow_sensitive: bool = False

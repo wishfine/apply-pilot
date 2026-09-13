@@ -41,6 +41,14 @@ RE_SPACES = re.compile(r"\s+")
 RE_DOTS_AND_SPACES = re.compile(r"[·•・\s]+")
 
 
+def _is_valid_calendar_date(year: int, month: int, day: int) -> bool:
+    try:
+        date(year, month, day)
+    except ValueError:
+        return False
+    return True
+
+
 # Suffixes stripped from Chinese administrative division names
 CITY_SUFFIXES: list[str] = [
     "特别行政区",
@@ -246,7 +254,7 @@ def parse_date_components(
     if m_full:
         try:
             y, m, d = int(m_full.group(1)), int(m_full.group(2)), int(m_full.group(3))
-            if 1900 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31:
+            if 1900 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31 and _is_valid_calendar_date(y, m, d):
                 return (y, m, d)
         except (ValueError, TypeError):
             return None
@@ -278,7 +286,7 @@ def parse_date_components(
     if m_c8:
         try:
             y, m, d = int(m_c8.group(1)), int(m_c8.group(2)), int(m_c8.group(3))
-            if 1900 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31:
+            if 1900 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31 and _is_valid_calendar_date(y, m, d):
                 return (y, m, d)
         except (ValueError, TypeError):
             return None

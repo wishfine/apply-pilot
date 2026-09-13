@@ -104,7 +104,9 @@ async def test_standard_input_filler_fill_failure():
 async def test_moka_search_select_filler():
     filler = MokaSearchSelectFiller()
     mock_page = AsyncMock()
+    mock_page.execute_unsafe_script = AsyncMock(return_value=True)
     mock_el = AsyncMock()
+    mock_el.inspect_field = AsyncMock(return_value={"observed_value": "计算机科学与技术"})
 
     assert await filler.can_handle(mock_el, {"field_type": "search_select"}) is True
     assert (
@@ -123,7 +125,9 @@ async def test_moka_search_select_filler():
 async def test_beisen_modal_school_picker():
     filler = BeisenModalSchoolPicker()
     mock_page = AsyncMock()
+    mock_page.execute_unsafe_script = AsyncMock(return_value=True)
     mock_el = AsyncMock()
+    mock_el.inspect_field = AsyncMock(return_value={"observed_value": "清华大学"})
 
     assert await filler.can_handle(mock_el, {"field_type": "beisen_modal"}) is True
     assert (
@@ -180,7 +184,9 @@ async def test_moka_application_adapter():
     assert any(isinstance(f, StandardInputFiller) for f in adapter.fillers)
 
     mock_page = AsyncMock()
+    mock_page.execute_unsafe_script = AsyncMock(return_value=True)
     mock_el = AsyncMock()
+    mock_el.inspect_field = AsyncMock(return_value={"observed_value": "硕士"})
 
     # Handles search_select via first filler
     res_select = await adapter.fill_field(
@@ -212,7 +218,9 @@ async def test_beisen_application_adapter():
     assert any(isinstance(f, StandardInputFiller) for f in adapter.fillers)
 
     mock_page = AsyncMock()
+    mock_page.execute_unsafe_script = AsyncMock(return_value=True)
     mock_el = AsyncMock()
+    mock_el.inspect_field = AsyncMock(return_value={"observed_value": "北京大学"})
 
     # Handles modal school picker
     res_school = await adapter.fill_field(
@@ -232,7 +240,28 @@ async def test_beisen_application_adapter():
     stage = await adapter.detect_stage(mock_page)
     assert stage == "beisen_stage"
     assert await adapter.advance(mock_page, stage) is False
+    mock_page.execute_unsafe_script = AsyncMock(return_value=False)
     assert await adapter.is_final_review(mock_page) is False
+
+
+@pytest.mark.asyncio
+async def test_complex_component_fillers_require_verified_selection():
+    page = AsyncMock()
+    page.execute_unsafe_script = AsyncMock(return_value=False)
+    element = AsyncMock()
+
+    assert await MokaSearchSelectFiller().can_handle(element, {"widget": "moka-search-select"}) is True
+    assert await BeisenModalSchoolPicker().can_handle(element, {"widget": "beisen-modal"}) is True
+
+    moka_result = await MokaSearchSelectFiller().fill(page, element, "清华大学")
+    beisen_result = await BeisenModalSchoolPicker().fill(page, element, "清华大学")
+
+    assert moka_result.success is False
+    assert moka_result.needs_human is True
+    assert moka_result.error_code == "SEARCH_OPTION_NOT_CONFIRMED"
+    assert beisen_result.success is False
+    assert beisen_result.needs_human is True
+    assert beisen_result.error_code == "MODAL_OPTION_NOT_CONFIRMED"
 
 
 @pytest.mark.asyncio
@@ -348,4 +377,3 @@ def test_explicit_empty_fillers_list():
 
     beisen = BeisenApplicationAdapter(fillers=[])
     assert beisen.fillers == []
-

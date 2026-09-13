@@ -7,7 +7,7 @@
 *One profile. Every application.*
 
 [![Python](https://img.shields.io/badge/Python-%3E%3D3.11-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/Tests-373%20Passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-389%20Passed-brightgreen.svg)](tests/)
 [![Architecture](https://img.shields.io/badge/Design-Local--first-orange.svg)](docs/superpowers/specs/2026-09-12-apply-pilot-v0.1-design.md)
 
 </div>
@@ -26,7 +26,7 @@ ApplyPilot 从本地候选人档案读取资料，通过 Playwright 辅助填写
 | 就绪检查 | 当前可见阶段的必填项检查；填写失败或人工补填后仍不满足要求时暂停 |
 | 北森 | 识别部分阶段标记和“下一步”按钮，验证阶段变化；识别最终提交按钮并停下 |
 | Moka / 通用 | 基础控件填充；目前按单页处理，尚无可靠的页面类型与最终阶段识别 |
-| 复杂组件 | 院校弹窗、搜索下拉只有初步实现；级联、自定义日期弹窗、动态重复经历尚未完整支持；原生 date/month 已支持，缺失精度时暂停而不补造日期 |
+| 复杂组件 | 院校弹窗、搜索下拉会在找不到并回读候选项时暂停；级联、自定义日期弹窗、动态重复经历尚未完整支持；原生 date/month 已支持，缺失精度时暂停而不补造日期 |
 | 跟踪 | SQLite 保存申请、执行轮次、阶段快照、审计事件；CLI 可查询记录 |
 | 恢复与提交后状态 | 支持 `apply resume` 重新打开 checkpoint 的实际 URL 并扫描；候选人、岗位、周期隔离，并保留已保存的披露策略；提交结果确认尚未实现 |
 
@@ -45,7 +45,7 @@ uv sync
 uv run playwright install chromium
 ```
 
-项目声明 Python >= 3.11；最近一次完整测试在 Python 3.13 和 3.14 上均为 373 项通过。
+项目声明 Python >= 3.11；最近一次完整测试在 Python 3.11 和 3.14 上均为 389 项通过。
 
 ### 2. 统一资料目录
 
@@ -157,7 +157,7 @@ uv run applypilot apply resume app_xxx -p "$APPLYPILOT_HOME/profile.yaml"
 ```
 
 - 档案和历史 `profile_revisions` 在本地以完整内容保存，没有数据库加密。
-- 字段操作审计使用 HMAC 指纹和遮罩预览；已识别的身份证、政治面貌、家庭等敏感路径不保留明文预览。这不等于整个数据库均已脱敏。
+- 字段操作审计使用 HMAC 指纹和遮罩预览；表单快照只保存结构元数据；已识别的身份证、政治面貌、家庭等敏感路径不保留明文预览。这不等于整个数据库均已脱敏。
 - `DisclosurePolicy` 控制向招聘表单填写部分敏感字段；CLI 当前没有配置该策略的选项。
 - 简历导入直接发送全文到所配置的模型服务，和本地表单填写的披露策略是两条独立流程。
 - SQLite WAL 提供事务与并发支持；审计表没有防篡改签名链或禁止修改的数据库约束，不能视为不可篡改账本。
@@ -174,7 +174,7 @@ APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run pytest tests/integration/ -q
 APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run --isolated --python 3.13 --locked pytest -q
 ```
 
-当前共有 373 项测试，其中包含真实浏览器表单回归、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
+当前共有 389 项测试，其中包含真实浏览器表单回归、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
 
 测试通过说明已覆盖的行为符合断言，不代表真实招聘站点全功能兼容。后续重点包括上下文映射、附件类型约束、登录与页面识别、可恢复申请状态机，以及真实平台组件适配。
 

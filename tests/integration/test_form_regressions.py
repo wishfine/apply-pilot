@@ -229,3 +229,90 @@ async def test_hidden_upload_with_visible_label_is_filled(form, tmp_path):
     status, _ = await run({'assets': [{'asset_id': 'asset_resume_pdf', 'asset_type': 'resume_pdf', 'file_path': str(asset), 'title': 'Fixture'}]})
     assert status == ApplicationStatus.READY_REVIEW
     assert await page.locator('input').evaluate('el => el.files[0].name') == 'resume.pdf'
+
+
+@pytest.mark.asyncio
+async def test_snapshot_does_not_store_candidate_values(form):
+    page, run, db = form
+    secret_name = '审查候选人敏感姓名'
+    await page.set_content('<input aria-label="姓名"><button>提交申请</button>')
+    status, _ = await run({'identity': {'name': secret_name}})
+    assert status == ApplicationStatus.READY_REVIEW
+    import aiosqlite
+    async with aiosqlite.connect(db) as conn:
+        row = await (await conn.execute(
+            'SELECT fields_meta_json FROM form_snapshots ORDER BY rowid DESC LIMIT 1'
+        )).fetchone()
+    assert secret_name not in row[0]
+    assert 'expected_value' not in row[0]
+    assert 'observed_value' not in row[0]
+    assert 'outer_html' not in row[0]
+
+
+@pytest.mark.asyncio
+async def test_prefilled_blocked_sensitive_field_pauses(form):
+    page, run, _ = form
+    value = '110101200001011234'
+    await page.set_content(f'<input aria-label="身份证号" value="{value}"><button>提交申请</button>')
+    status, _ = await run({'identity': {'id_number': value}}, sensitive=False)
+    assert status == ApplicationStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_optional_radio_without_matching_option_pauses(form):
+    page, run, _ = form
+    await page.set_content('''
+        <fieldset><legend>性别</legend>
+          <label><input name="gender" type="radio" value="x">未知一</label>
+          <label><input name="gender" type="radio" value="y">未知二</label>
+        </fieldset><button>提交申请</button>
+    ''')
+    status, _ = await run({'identity': {'gender': 'male'}})
+    assert status == ApplicationStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_disabled_submit_does_not_claim_final_review(form):
+    page, run, _ = form
+    await page.set_content('<input aria-label="姓名"><button disabled>提交申请</button>')
+    status, _ = await run({'identity': {'name': '测试甲'}})
+    assert status == ApplicationStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_moka_login_text_in_header_does_not_block_form(form):
+    page, run, _ = form
+    await page.set_content('<nav>立即登录</nav><input aria-label="姓名"><button>提交申请</button>')
+    status, _ = await run({'identity': {'name': '测试甲'}}, provider='moka')
+    assert status == ApplicationStatus.READY_REVIEW
+    assert await page.locator('input').input_value() == '测试甲'
+
+
+@pytest.mark.asyncio
+async def test_secret_asset_is_not_uploaded_when_sensitive_disclosure_disabled(form, tmp_path):
+    page, run, _ = form
+    secret_file = tmp_path / 'secret-resume.pdf'
+    secret_file.write_bytes(b'%PDF-1.4 audit fixture')
+    await page.set_content('<input aria-label="上传简历" type="file" required><button>提交申请</button>')
+    status, _ = await run({'assets': [{
+        'asset_id': 'asset_resume_pdf', 'asset_type': 'resume_pdf',
+        'file_path': str(secret_file), 'title': 'secret', 'sensitivity': 'secret',
+    }]}, sensitive=False)
+    assert status == ApplicationStatus.PAUSED
+    assert await page.locator('input').evaluate('el => el.files.length') == 0
+
+
+@pytest.mark.asyncio
+async def test_moka_search_widget_selects_and_verifies_option(form):
+    page, run, _ = form
+    await page.set_content('''
+        <input aria-label="毕业院校" data-widget="search_select">
+        <div role="option" onclick="const i=document.querySelector('input');i.value=this.textContent.trim();i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}))">清华大学</div>
+        <button>提交申请</button>
+    ''')
+    status, _ = await run({'education': [{
+        'id': 'edu-master', 'school_name': '清华大学', 'education_level': 'master',
+        'major': '计算机科学', 'start_date': '2022-09', 'end_date': '2025-06',
+    }]}, provider='moka')
+    assert status == ApplicationStatus.READY_REVIEW
+    assert await page.locator('input').input_value() == '清华大学'

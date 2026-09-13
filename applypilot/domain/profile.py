@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from applypilot.domain.base import FactMetadata, PartialDate, SensitivityLevel, TriState
 
 
@@ -26,7 +26,11 @@ class ExperienceType(StrEnum):
     VOLUNTEER = "volunteer"  # 志愿活动
 
 
-class IdentityInfo(BaseModel):
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class IdentityInfo(_StrictModel):
     """Candidate personal identity fields."""
 
     name: Optional[str] = None
@@ -41,7 +45,7 @@ class IdentityInfo(BaseModel):
     health_status: Optional[str] = None  # 严禁默认健康
 
 
-class ContactInfo(BaseModel):
+class ContactInfo(_StrictModel):
     """Candidate contact and emergency information."""
 
     mobile: Optional[str] = None
@@ -51,7 +55,7 @@ class ContactInfo(BaseModel):
     emergency_contact_phone: Optional[str] = None
 
 
-class EducationRecord(BaseModel):
+class EducationRecord(_StrictModel):
     """Academic degree and institution attendance record."""
 
     id: str  # 稳定 ID: edu_bachelor, edu_master
@@ -70,7 +74,7 @@ class EducationRecord(BaseModel):
     thesis_title: Optional[str] = None
 
 
-class ExperienceRecord(BaseModel):
+class ExperienceRecord(_StrictModel):
     """Work and internship experience record."""
 
     id: str  # 稳定 ID: exp_bytedance_intern
@@ -85,7 +89,7 @@ class ExperienceRecord(BaseModel):
     skills_used_ids: list[str] = Field(default_factory=list)
 
 
-class ProjectRecord(BaseModel):
+class ProjectRecord(_StrictModel):
     """Project record."""
 
     id: str  # 稳定 ID: proj_apply_pilot
@@ -99,7 +103,7 @@ class ProjectRecord(BaseModel):
     repo_url: Optional[str] = None
 
 
-class SkillRecord(BaseModel):
+class SkillRecord(_StrictModel):
     """Candidate verified or claimed skill."""
 
     skill_id: str  # skill_python, skill_financial_modeling
@@ -109,7 +113,7 @@ class SkillRecord(BaseModel):
     years_experience: Optional[float] = None
 
 
-class AssetRecord(BaseModel):
+class AssetRecord(_StrictModel):
     """Local attachment or credential artifact."""
 
     asset_id: str  # asset_resume_pdf, asset_transcript
@@ -120,7 +124,7 @@ class AssetRecord(BaseModel):
     sensitivity: SensitivityLevel = SensitivityLevel.PERSONAL
 
 
-class ChinaCampusContext(BaseModel):
+class ChinaCampusContext(_StrictModel):
     """Contextual academic and graduation facts for Chinese campus hiring."""
 
     graduation_year: Optional[int] = None
@@ -133,7 +137,7 @@ class ChinaCampusContext(BaseModel):
     has_dispatch_qualification: TriState = TriState.UNKNOWN
 
 
-class FamilyMember(BaseModel):
+class FamilyMember(_StrictModel):
     """Family member details for SOE or background clearance."""
 
     id: str  # family_father, family_mother
@@ -145,7 +149,7 @@ class FamilyMember(BaseModel):
     phone: Optional[str] = None
 
 
-class SOEExtendedInfo(BaseModel):
+class SOEExtendedInfo(_StrictModel):
     """State-owned enterprise specific questionnaire details."""
 
     political_status: Optional[str] = None  # 严禁默认党员或团员
@@ -158,7 +162,7 @@ class SOEExtendedInfo(BaseModel):
     conflict_details: Optional[str] = None
 
 
-class StoryRecord(BaseModel):
+class StoryRecord(_StrictModel):
     """STAR behavioral question story repository."""
 
     story_id: str
@@ -171,7 +175,7 @@ class StoryRecord(BaseModel):
     related_fact_ids: list[str] = Field(default_factory=list)
 
 
-class CandidateProfile(BaseModel):
+class CandidateProfile(_StrictModel):
     """Complete, verified factual ground truth profile of a candidate."""
 
     schema_version: str = "1.1.0"

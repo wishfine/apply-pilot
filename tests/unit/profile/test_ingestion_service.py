@@ -112,6 +112,17 @@ def test_missing_profile_id_is_derived_from_profile_content():
     assert empty_first["profile_id"] != empty_second["profile_id"]
 
 
+def test_model_supplied_profile_ids_are_replaced_with_content_derived_ids():
+    first = ResumeIngestionService._normalize_profile_dict(
+        {"profile_id": "cand_001", "identity": {"name": "甲"}}
+    )
+    second = ResumeIngestionService._normalize_profile_dict(
+        {"profile_id": "cand_001", "identity": {"name": "乙"}}
+    )
+    assert first["profile_id"] != second["profile_id"]
+    assert first["profile_id"].startswith("cand_")
+
+
 @pytest.mark.asyncio
 async def test_parse_text_empty_or_whitespace_raises_error():
     service = ResumeIngestionService(api_key="test_api_key")
@@ -133,7 +144,8 @@ async def test_parse_text_success(sample_profile_dict):
         profile = await service.parse_text("张三的简历文本内容")
 
         assert isinstance(profile, CandidateProfile)
-        assert profile.profile_id == "cand_zhangsan"
+        assert profile.profile_id.startswith("cand_")
+        assert profile.profile_id != "cand_zhangsan"
         assert profile.identity.name == "张三"
         assert profile.contact.email == "zhangsan@example.com"
         assert len(profile.education) == 1

@@ -134,10 +134,13 @@ class PlaywrightElement:
                         label: (option.label || '').trim(),
                     }))
                     : null;
+                const widget = el.getAttribute('data-widget') || el.getAttribute('data-component')
+                    || (typeof el.className === 'string' ? el.className : '');
                 return {section_title: sectionTitle, tag: el.tagName.toLowerCase(), type: el.type || '', label,
                     field_sig: el.id || el.name || label, element_attrs: attrs,
                     outer_html: (container || el).outerHTML, observed_value: observed,
-                    option_label: optionLabel, options, is_active: !!active, is_valid: el.validity ? el.validity.valid : true};
+                    option_label: optionLabel, options, widget, is_active: !!active,
+                    is_valid: el.validity ? el.validity.valid : true};
             }""", timeout=self._policy.action_timeout_ms)
         except Exception as e:
             raise BrowserDriverError(f"inspect_field failed: {e}") from e
