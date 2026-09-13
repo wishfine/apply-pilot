@@ -382,6 +382,7 @@ def _execute_apply_session(
             browser_backend=browser,
             interactive_readiness=interactive_readiness,
             readiness_resolver=terminal_readiness_resolver if interactive_readiness else None,
+            form_hydration_timeout_ms=5000,
         )
         try:
             status = await engine.run_application_target(target, profile)

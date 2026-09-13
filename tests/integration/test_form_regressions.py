@@ -316,3 +316,19 @@ async def test_moka_search_widget_selects_and_verifies_option(form):
     }]}, provider='moka')
     assert status == ApplicationStatus.READY_REVIEW
     assert await page.locator('input').input_value() == '清华大学'
+
+
+@pytest.mark.asyncio
+async def test_delayed_form_hydration_is_waited_for_before_pausing(form):
+    page, run, _ = form
+    await page.set_content('''
+        <div id="app"></div>
+        <script>
+          setTimeout(() => {
+            document.querySelector('#app').innerHTML = '<input aria-label="姓名"><button>提交申请</button>';
+          }, 350);
+        </script>
+    ''')
+    status, _ = await run({'identity': {'name': '测试甲'}})
+    assert status == ApplicationStatus.READY_REVIEW
+    assert await page.locator('input').input_value() == '测试甲'

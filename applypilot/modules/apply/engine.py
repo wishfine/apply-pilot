@@ -6,6 +6,7 @@ typed value resolution, disclosure gate, element filling, and human checkpoint h
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -58,12 +59,14 @@ class ApplyEngine:
         resolver: Optional[Any] = None,
         interactive_readiness: bool = True,
         readiness_resolver: Optional[Callable] = None,
+        form_hydration_timeout_ms: int = 1000,
     ) -> None:
         self.db_path = Path(db_path)
         self.browser = browser_backend
         self.browser_backend = browser_backend
         self.interactive_readiness = interactive_readiness
         self.readiness_resolver = readiness_resolver
+        self.form_hydration_timeout_ms = max(0, int(form_hydration_timeout_ms))
 
         # Repositories
         self.app_repo = ApplicationRepository(self.db_path)
@@ -314,6 +317,37 @@ class ApplyEngine:
                 continue
         return signatures
 
+    async def _wait_for_form_elements(
+        self,
+        page: Any,
+        selector: str,
+        timeout_ms: int = 5000,
+    ) -> list[Any]:
+        """Allow SPA/legacy ATS pages time to hydrate controls after navigation."""
+        if not hasattr(page, "find_all"):
+            return []
+        attempts = max(1, timeout_ms // 150)
+        for attempt in range(attempts):
+            try:
+                elements = await page.find_all(selector)
+            except Exception:
+                elements = []
+            if elements:
+                active_found = False
+                for element in elements:
+                    try:
+                        state = await self._live_field(element)
+                        if state is None or state.get("is_active") is not False:
+                            active_found = True
+                            break
+                    except Exception:
+                        continue
+                if active_found:
+                    return elements
+            if attempt + 1 < attempts:
+                await asyncio.sleep(0.15)
+        return []
+
     async def _field_structure_changed(self, page: Any, fields: list[dict[str, Any]]) -> bool:
         current = await self._active_field_signatures(page)
         scanned = [
@@ -556,8 +590,10 @@ class ApplyEngine:
                 scanned_elements: list[Any] = []
 
                 if hasattr(page, "find_all"):
-                    elements = await page.find_all(
-                        "input:not([type='hidden']), select, textarea"
+                    elements = await self._wait_for_form_elements(
+                        page,
+                        "input:not([type='hidden']), select, textarea",
+                        timeout_ms=self.form_hydration_timeout_ms,
                     )
                     for element in elements:
                         try:
