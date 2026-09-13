@@ -9,9 +9,9 @@ Implements tri-level decision engine:
 
 from __future__ import annotations
 
-from __future__ import annotations
-
 from collections.abc import Mapping
+import hashlib
+import json
 from typing import Any, NamedTuple, Optional, Sequence
 
 
@@ -144,6 +144,25 @@ def _extract_item_value(item: Any, *keys: str, default: Any = None) -> Any:
     return default
 
 
+def _options_signature(options: Optional[Sequence[Any]]) -> Optional[str]:
+    """Return a stable signature for an option set when the set is observable."""
+    if options is None:
+        return None
+    normalized: list[dict[str, str]] = []
+    for option in options:
+        if isinstance(option, Mapping):
+            normalized.append({
+                "value": _clean_label(str(option.get("value") or "")),
+                "text": _clean_label(str(option.get("text") or "")),
+                "label": _clean_label(str(option.get("label") or "")),
+            })
+        else:
+            value = _clean_label(str(option))
+            normalized.append({"value": value, "text": value, "label": value})
+    encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 class FieldMapper:
     """Three-tier field mapping engine with scoped memory priority."""
 
@@ -166,6 +185,7 @@ class FieldMapper:
         4. Unmapped Fallback (method="unmapped", conf=0.0)
         """
         clean_key = _clean_label(normalized_label)
+        current_options_signature = _options_signature(options)
 
         # -----------------------------------------------------------------
         # Tier 1: Scoped CorrectionMemory
@@ -184,6 +204,15 @@ class FieldMapper:
 
                 if _clean_label(str(mem_label)) != clean_key:
                     continue
+
+                mem_field_type = _extract_item_value(mem, "field_type")
+                if mem_field_type and str(mem_field_type).strip().lower() != field_type.strip().lower():
+                    continue
+
+                mem_options_signature = _extract_item_value(mem, "options_signature")
+                if mem_options_signature:
+                    if current_options_signature is None or str(mem_options_signature) != current_options_signature:
+                        continue
 
                 # Check section scope constraint with normalized comparison
                 mem_section = _extract_item_value(
@@ -223,7 +252,11 @@ class FieldMapper:
         # -----------------------------------------------------------------
         # 1. Family member context (father, mother, spouse, child)
         fam_entity = None
-        if "父亲" in clean_key or ("父" in clean_key and any(k in clean_key for k in ("姓名", "电话", "手机", "工作", "单位", "职务"))):
+        unsupported_relations = ("祖父", "祖母", "外祖父", "外祖母", "爷爷", "奶奶", "外公", "外婆")
+        if any(relation in clean_key or relation in clean_sec for relation in unsupported_relations):
+            if any(key in clean_key for key in ("姓名", "名字", "电话", "手机", "工作", "单位", "职务", "职位", "岗位")):
+                return FieldMappingResult(None, "unmapped", 0.0)
+        elif "父亲" in clean_key or ("父" in clean_key and any(k in clean_key for k in ("姓名", "电话", "手机", "工作", "单位", "职务"))):
             fam_entity = "father"
         elif "母亲" in clean_key or ("母" in clean_key and any(k in clean_key for k in ("姓名", "电话", "手机", "工作", "单位", "职务"))):
             fam_entity = "mother"

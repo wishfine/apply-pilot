@@ -28,7 +28,7 @@ ApplyPilot 从本地候选人档案读取资料，通过 Playwright 辅助填写
 | Moka / 通用 | 基础控件填充；目前按单页处理，尚无可靠的页面类型与最终阶段识别 |
 | 复杂组件 | 院校弹窗、搜索下拉只有初步实现；级联、自定义日期弹窗、动态重复经历尚未完整支持；原生 date/month 已支持，缺失精度时暂停而不补造日期 |
 | 跟踪 | SQLite 保存申请、执行轮次、阶段快照、审计事件；CLI 可查询记录 |
-| 恢复与提交后状态 | 支持 `apply resume` 重新打开 checkpoint 的实际 URL 并扫描；候选人、岗位、周期隔离；提交结果确认尚未实现 |
+| 恢复与提交后状态 | 支持 `apply resume` 重新打开 checkpoint 的实际 URL 并扫描；候选人、岗位、周期隔离，并保留已保存的披露策略；提交结果确认尚未实现 |
 
 `CandidateProfile` 是事实来源，`ResumeVariant` 是展示与选择的数据模型。当前 CLI 尚未提供变体选择、简历导出和纠错记忆编辑命令。自动提取的资料仍需人工核实，结构校验不能证明事实正确。
 
@@ -129,7 +129,7 @@ uv run applypilot track status app_xxx
 uv run applypilot apply resume app_xxx -p "$APPLYPILOT_HOME/profile.yaml"
 ```
 
-恢复前校验候选人归属、申请状态和 checkpoint，保留招聘周期，并重新打开保存的实际页面 URL、重新扫描。相同 URL 保持岗位 ID 稳定，`#/job/...` 路由参与身份计算。旧版本生成的随机岗位 ID 不会自动迁移；尚无“标记已提交”命令。页面仅存在内存中的步骤状态无法通过 URL 重建时，需要人工重新进入对应步骤。
+恢复前校验候选人归属、申请状态和 checkpoint，保留招聘周期、平台信息与披露策略，并重新打开保存的实际页面 URL、重新扫描。相同 URL 保持岗位 ID 稳定，`#/job/...` 路由参与身份计算。旧记录没有保存披露策略时，恢复会禁止自动填写，直到用户在浏览器中人工核对；旧版本生成的随机岗位 ID 不会自动迁移；尚无“标记已提交”命令。页面仅存在内存中的步骤状态无法通过 URL 重建时，需要人工重新进入对应步骤。
 
 ## CLI 参考
 
@@ -174,7 +174,7 @@ APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run pytest tests/integration/ -q
 APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run --isolated --python 3.13 --locked pytest -q
 ```
 
-当前共有 344 项测试，其中包含真实浏览器表单回归、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
+当前共有 359 项测试，其中包含真实浏览器表单回归、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
 
 测试通过说明已覆盖的行为符合断言，不代表真实招聘站点全功能兼容。后续重点包括上下文映射、附件类型约束、登录与页面识别、可恢复申请状态机，以及真实平台组件适配。
 

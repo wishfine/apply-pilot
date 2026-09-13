@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS applications (
     status VARCHAR(32) NOT NULL, -- created, in_progress, ready_review, submitted, withdrawn, expired
     current_stage VARCHAR(64),
     assigned_variant_id VARCHAR(64),
+    target_context_json TEXT,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );

@@ -55,6 +55,12 @@ def test_partial_date_validation_rules():
         PartialDate(year=2025, month=5, day=32)
 
 
+@pytest.mark.parametrize("value", ["2023-02-31", "2024-foo-12", "2024-01-01-extra"])
+def test_partial_date_rejects_invalid_calendar_and_malformed_strings(value):
+    with pytest.raises(ValueError):
+        PartialDate.model_validate(value)
+
+
 def test_field_policy_defaults():
     policy = FieldPolicy(
         path_pattern="profile.name",

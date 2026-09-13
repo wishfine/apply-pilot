@@ -1,4 +1,5 @@
 import datetime
+import re
 from enum import StrEnum
 from typing import Any, Optional
 from pydantic import BaseModel, Field, model_validator
@@ -25,14 +26,16 @@ class PartialDate(BaseModel):
         if isinstance(data, (datetime.date, datetime.datetime)):
             return {"year": data.year, "month": data.month, "day": data.day}
         if isinstance(data, str):
-            data = data.strip()
-            parts = [int(p) for p in data.split("-") if p.isdigit()]
-            if len(parts) == 1:
-                return {"year": parts[0]}
-            elif len(parts) == 2:
-                return {"year": parts[0], "month": parts[1]}
-            elif len(parts) >= 3:
-                return {"year": parts[0], "month": parts[1], "day": parts[2]}
+            match = re.fullmatch(
+                r"(?P<year>\d{4})(?:-(?P<month>\d{1,2})(?:-(?P<day>\d{1,2}))?)?",
+                data.strip(),
+            )
+            if match is not None:
+                return {
+                    key: int(value)
+                    for key, value in match.groupdict().items()
+                    if value is not None
+                }
         return data
 
     @model_validator(mode="after")
@@ -43,6 +46,11 @@ class PartialDate(BaseModel):
             raise ValueError(f"Month must be between 1 and 12, got {self.month}")
         if self.day is not None and not (1 <= self.day <= 31):
             raise ValueError(f"Day must be between 1 and 31, got {self.day}")
+        if self.day is not None:
+            try:
+                datetime.date(self.year, self.month, self.day)
+            except ValueError as exc:
+                raise ValueError(f"Invalid calendar date: {self.to_display()}") from exc
         return self
 
     def to_display(self) -> str:

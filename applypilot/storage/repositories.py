@@ -51,6 +51,7 @@ class ApplicationRepository:
         status: str = "created",
         current_stage: Optional[str] = None,
         assigned_variant_id: Optional[str] = None,
+        target_context: Optional[Dict[str, Any]] = None,
     ) -> None:
         now = _utc_now_iso()
         async with aiosqlite.connect(self.db_path) as db:
@@ -60,9 +61,9 @@ class ApplicationRepository:
                 INSERT INTO applications (
                     id, application_key, candidate_id, canonical_job_id,
                     company_name, job_title, recruitment_cycle, status,
-                    current_stage, assigned_variant_id, created_at, updated_at
+                    current_stage, assigned_variant_id, target_context_json, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     app_id,
@@ -75,9 +76,20 @@ class ApplicationRepository:
                     status,
                     current_stage,
                     assigned_variant_id,
+                    _to_json_str(target_context) if target_context is not None else None,
                     now,
                     now,
                 ),
+            )
+            await db.commit()
+
+    async def update_target_context(self, app_id: str, target_context: Dict[str, Any]) -> None:
+        now = _utc_now_iso()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA foreign_keys = ON;")
+            await db.execute(
+                "UPDATE applications SET target_context_json = ?, updated_at = ? WHERE id = ?",
+                (_to_json_str(target_context), now, app_id),
             )
             await db.commit()
 

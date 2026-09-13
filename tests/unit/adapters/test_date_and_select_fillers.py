@@ -152,6 +152,23 @@ async def test_native_select_filler_education_degree_semantic_match():
 
 
 @pytest.mark.asyncio
+async def test_native_select_does_not_treat_concrete_academic_degrees_as_interchangeable():
+    filler = NativeSelectFiller()
+    mock_el = AsyncMock()
+    mock_el.select_option = AsyncMock()
+    mock_el.evaluate = AsyncMock(return_value=[
+        {"value": "science", "text": "理学硕士", "label": "理学硕士"},
+        {"value": "engineering", "text": "工程硕士", "label": "工程硕士"},
+    ])
+
+    res = await filler.fill(AsyncMock(), mock_el, "工学硕士")
+
+    assert res.success is False
+    assert res.error_code.startswith("OPTION_MISMATCH")
+    mock_el.select_option.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_native_select_filler_boolean_match():
     filler = NativeSelectFiller()
     mock_el = AsyncMock()

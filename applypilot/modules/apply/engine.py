@@ -12,7 +12,9 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
+from urllib.parse import urlparse
 import uuid
+from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +89,8 @@ class ApplyEngine:
     def _infer_value_kind(path: str) -> ValueKind:
         """Infer semantic ValueKind from canonical profile path for normalized readback comparison."""
         p = path.lower()
+        if "assets[" in p or "file_path" in p:
+            return ValueKind.FILE
         if "city" in p:
             return ValueKind.CITY
         if "phone" in p or "mobile" in p:
@@ -99,6 +103,8 @@ class ApplyEngine:
             return ValueKind.ACADEMIC_DEGREE
         if "political" in p:
             return ValueKind.POLITICAL_STATUS
+        if "gender" in p:
+            return ValueKind.GENDER
         if "name" in p:
             return ValueKind.PERSON_NAME
         if "email" in p:
@@ -108,8 +114,14 @@ class ApplyEngine:
     def _check_disclosure(self, policy: Optional[DisclosurePolicy], path: str) -> bool:
         """Evaluate path against disclosure gate policy. Defaults to strict policy when None."""
         effective_policy = policy if policy is not None else DisclosurePolicy()
-        if path in effective_policy.blocked_field_paths:
-            return False
+        for blocked_path in effective_policy.blocked_field_paths:
+            if (
+                blocked_path == "*"
+                or path == blocked_path
+                or path.startswith(f"{blocked_path}.")
+                or path.startswith(f"{blocked_path}[")
+            ):
+                return False
         if "family" in path and not effective_policy.disclose_family:
             return False
         if "political" in path and not effective_policy.disclose_political:
@@ -132,11 +144,71 @@ class ApplyEngine:
                 if state is not None:
                     field["observed_value"] = state["observed_value"]
                     field["is_valid"] = state["is_valid"]
+                    field["element_attrs"] = state["element_attrs"]
+                    field["outer_html"] = state["outer_html"]
+                    field["is_required"] = FormRequirementDetector.is_field_required(
+                        element_attrs=state["element_attrs"],
+                        label=field.get("label"),
+                        outer_html=state["outer_html"],
+                    )
                     if state.get("is_active") is False:
                         field["is_required"] = False
             except Exception:
                 field["observed_value"] = None
                 field["is_valid"] = False
+
+    async def _is_login_page(self, adapter: Any, page: Any) -> bool:
+        if hasattr(adapter, "is_login_page"):
+            try:
+                return (await adapter.is_login_page(page)) is True
+            except Exception:
+                return False
+        if page and hasattr(page, "execute_unsafe_script"):
+            try:
+                result = await page.execute_unsafe_script(
+                    "Detect login page signals",
+                    """() => {
+                        const text = (document.body ? document.body.innerText : '') || '';
+                        return /(请先登录|扫码登录|微信扫码|账号密码登录|短信登录|登录后投递|立即登录|验证码登录|请登录)/i.test(text);
+                    }""",
+                )
+                return result is True
+            except Exception:
+                return False
+        return False
+
+    async def _active_field_signatures(self, page: Any) -> list[str]:
+        """Return signatures for the currently active controls on the page."""
+        if not hasattr(page, "find_all"):
+            return []
+        elements = await page.find_all("input:not([type='hidden']), select, textarea")
+        signatures: list[str] = []
+        for index, element in enumerate(elements):
+            try:
+                live_state = await self._live_field(element)
+                if live_state is not None:
+                    if live_state.get("is_active") is False:
+                        continue
+                    signature = live_state.get("field_sig")
+                else:
+                    signature = None
+                    if hasattr(element, "get_attribute"):
+                        for attr in ("id", "name", "aria-label", "placeholder"):
+                            value = await element.get_attribute(attr)
+                            if isinstance(value, str) and value.strip():
+                                signature = value
+                                break
+                signatures.append(str(signature or f"unnamed-{index}"))
+            except Exception:
+                # A detached locator was already ignored by the scanning loop;
+                # it is not evidence that the live form gained another field.
+                continue
+        return signatures
+
+    async def _field_structure_changed(self, page: Any, fields: list[dict[str, Any]]) -> bool:
+        current = await self._active_field_signatures(page)
+        scanned = [str(field.get("field_sig") or "") for field in fields]
+        return Counter(current) != Counter(scanned)
 
     async def _pause_application(self, app_id: str, run_id: str, url: str,
                                  stage: str, snapshot_id: str) -> ApplicationStatus:
@@ -163,10 +235,19 @@ class ApplyEngine:
             # -----------------------------------------------------------------
             cycle = target.job.recruitment_cycle or "default"
             app_key = f"{profile.profile_id}:{target.job.job_id}:{cycle}"
+            target_context = {
+                "platform_type": target.platform_type,
+                "provider": target.provider,
+                "final_form_url": target.final_form_url,
+                "assigned_variant_id": target.assigned_variant_id,
+                "disclosure_policy": target.disclosure_policy.model_dump(mode="json"),
+            }
 
             existing_app = await self.app_repo.get_application_by_key(app_key)
             if existing_app:
                 app_id = existing_app["id"]
+                if not existing_app.get("target_context_json"):
+                    await self.app_repo.update_target_context(app_id, target_context)
             else:
                 app_id = "app_" + hashlib.sha256(app_key.encode()).hexdigest()[:24]
                 await self.app_repo.create_application(
@@ -179,6 +260,7 @@ class ApplyEngine:
                     recruitment_cycle=target.job.recruitment_cycle,
                     status=ApplicationStatus.CREATED,
                     assigned_variant_id=target.assigned_variant_id,
+                    target_context=target_context,
                 )
 
             await self.app_repo.update_status(app_id, ApplicationStatus.IN_PROGRESS)
@@ -266,6 +348,10 @@ class ApplyEngine:
             # -----------------------------------------------------------------
             target_url = target.final_form_url or target.job.apply_url
             page = await self.browser.open_page(target_url)
+            if callable(getattr(type(page), "url", None)):
+                actual_url = await page.url()
+                if actual_url and actual_url != "about:blank":
+                    target_url = actual_url
 
             current_platform = "generic"
             if target.provider and target.provider in self.adapters:
@@ -285,12 +371,18 @@ class ApplyEngine:
                     "generic", next(iter(self.adapters.values()))
                 )
 
-            corrections = await self.corr_repo.lookup_corrections(platform=current_platform)
+            parsed_target_url = urlparse(target_url)
+            tenant_hint = parsed_target_url.netloc.lower() or None
+            corrections = await self.corr_repo.lookup_corrections(
+                platform=current_platform,
+                tenant_hint=tenant_hint,
+            )
 
             # -----------------------------------------------------------------
             # d. Multi-Stage Filling Loop (max 10 iterations)
             # -----------------------------------------------------------------
             completed_normally = False
+            structure_rescan_attempts: dict[str, int] = {}
             for step in range(10):
                 current_stage = (
                     await adapter.detect_stage(page)
@@ -312,6 +404,18 @@ class ApplyEngine:
                     fields_meta_json=[],
                     stage_key=current_stage,
                 )
+
+                if await self._is_login_page(adapter, page):
+                    logger.warning("检测到当前页面为登录页面，暂停等待用户在浏览器中完成登录")
+                    await self.event_repo.append_event(
+                        event_id=f"evt_{uuid.uuid4().hex[:12]}",
+                        run_id=run_id,
+                        event_type="LOGIN_REQUIRED",
+                        payload_json={"stage": current_stage, "page_url": target_url},
+                    )
+                    return await self._pause_application(
+                        app_id, run_id, target_url, "login_required", snap_id
+                    )
 
                 stage_scanned_fields: list[dict[str, Any]] = []
                 scanned_elements: list[Any] = []
@@ -461,6 +565,7 @@ class ApplyEngine:
                                 normalized_label=label,
                                 section_title=(live_state.get("section_title") or current_stage) if live_state else current_stage,
                                 field_type=field_type,
+                                options=live_state.get("options") if live_state else None,
                                 correction_memories=corrections,
                             )
                             path, method, conf = map_res
@@ -488,6 +593,9 @@ class ApplyEngine:
                                 if not observed and hasattr(element, "get_attribute"):
                                     observed = await element.get_attribute("value")
 
+                            expected = None
+                            kind = ValueKind.PLAIN_TEXT
+                            fill_failed = False
                             if path and disclosure_allowed:
                                 expected = self.resolver.resolve(profile, variant, path)
                                 if expected is not None:
@@ -509,6 +617,7 @@ class ApplyEngine:
                                         )
                                         action_type = str(getattr(res, "action_type", "type_text"))
                                         status_str = "success" if getattr(res, "success", True) else "failed"
+                                        fill_failed = not getattr(res, "success", True)
                                         after_fill = await self._live_field(element)
                                         obs_raw = (after_fill["observed_value"] if after_fill is not None
                                                    else getattr(res, "observed_value", None))
@@ -550,12 +659,15 @@ class ApplyEngine:
                             stage_scanned_fields.append({
                                 "field_sig": field_sig,
                                 "label": label,
-                                "section_title": current_stage,
+                                "section_title": (live_state.get("section_title") or current_stage) if live_state else current_stage,
                                 "is_required": is_required,
                                 "mapped_path": path,
                                 "observed_value": observed,
                                 "element_attrs": element_attrs,
                                 "outer_html": outer_html,
+                                "expected_value": expected,
+                                "value_kind": kind,
+                                "fill_failed": fill_failed,
                             })
                         except Exception as e:
                             logger.warning(
@@ -568,25 +680,24 @@ class ApplyEngine:
                 # Re-read all controls after filling, including radio groups.
                 await self._refresh_readiness(stage_scanned_fields, scanned_elements)
 
-                if len(stage_scanned_fields) == 0:
-                    is_login = False
-                    if hasattr(adapter, "is_login_page"):
-                        login_res = await adapter.is_login_page(page)
-                        is_login = login_res is True
-                    elif page and hasattr(page, "execute_unsafe_script"):
-                        try:
-                            login_res = await page.execute_unsafe_script(
-                                "Detect login page signals",
-                                """() => {
-                                    const text = (document.body ? document.body.innerText : '') || '';
-                                    return /(请先登录|扫码登录|微信扫码|账号密码登录|短信登录|登录后投递|立即登录|验证码登录|请登录)/i.test(text);
-                                }""",
-                            )
-                            is_login = login_res is True
-                        except Exception:
-                            is_login = False
+                if await self._field_structure_changed(page, stage_scanned_fields):
+                    attempts = structure_rescan_attempts.get(current_stage, 0) + 1
+                    structure_rescan_attempts[current_stage] = attempts
+                    if attempts > 3:
+                        await self.event_repo.append_event(
+                            event_id=f"evt_{uuid.uuid4().hex[:12]}",
+                            run_id=run_id,
+                            event_type="FORM_STRUCTURE_UNSTABLE",
+                            payload_json={"stage": current_stage, "page_url": target_url},
+                        )
+                        return await self._pause_application(
+                            app_id, run_id, target_url, current_stage, snap_id
+                        )
+                    continue
+                structure_rescan_attempts.pop(current_stage, None)
 
-                    if is_login:
+                if len(stage_scanned_fields) == 0:
+                    if await self._is_login_page(adapter, page):
                         logger.warning("检测到当前页面为登录页面，暂停等待用户在浏览器中完成登录")
                         await self.event_repo.append_event(
                             event_id=f"evt_{uuid.uuid4().hex[:12]}",
@@ -640,6 +751,10 @@ class ApplyEngine:
                                 item.model_dump(mode="json", exclude={"observed_value"})
                                 for item in report.missing_required
                             ],
+                            "conflicting_fields": [
+                                item.model_dump(mode="json", exclude={"observed_value"})
+                                for item in report.conflicting_fields
+                            ],
                         },
                     )
                     if self.interactive_readiness:
@@ -656,10 +771,10 @@ class ApplyEngine:
                         else:
                             missing_labels = ", ".join(
                                 item.label or item.field_sig
-                                for item in report.missing_required
+                                for item in report.blocking_fields
                             )
                             await self.browser.wait_for_user(
-                                f"阶段【{current_stage}】存在 {len(report.missing_required)} 个必填缺失项：{missing_labels}，请在浏览器中核对补填"
+                                f"阶段【{current_stage}】存在 {len(report.blocking_fields)} 个待处理项：{missing_labels}，请在浏览器中核对补填"
                             )
                     else:
                         return await self._pause_application(
@@ -668,6 +783,8 @@ class ApplyEngine:
 
                 if not report.is_ready:
                     await self._refresh_readiness(stage_scanned_fields, scanned_elements)
+                    if await self._field_structure_changed(page, stage_scanned_fields):
+                        continue
                     report = ReadinessAuditor.audit_fields(stage_scanned_fields, profile, variant)
                     if not report.is_ready:
                         return await self._pause_application(

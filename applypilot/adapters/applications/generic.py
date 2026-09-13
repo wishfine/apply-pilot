@@ -297,6 +297,30 @@ class NativeSelectFiller:
             ):
                 return opt
 
+        # Concrete degrees identify a discipline as well as a level (for example,
+        # "工学硕士").  A same-level option such as "理学硕士" is not a safe
+        # substitute, so only an exact displayed degree may be selected.
+        from applypilot.modules.apply.normalizer import normalize_academic_degree
+
+        degree_value = normalize_academic_degree(val_str)
+        is_concrete_degree = bool(
+            degree_value
+            and any(
+                degree_value.endswith(suffix) and degree_value != suffix
+                for suffix in ("学士", "硕士", "博士")
+            )
+        )
+        if is_concrete_degree:
+            target_degree = degree_value.strip().lower()
+            for opt in options:
+                candidates = (opt.get("value", ""), opt.get("text", ""), opt.get("label", ""))
+                if any(
+                    (normalize_academic_degree(candidate) or "").strip().lower() == target_degree
+                    for candidate in candidates
+                ):
+                    return opt
+            return None
+
         # 2. Gender semantic mapping (e.g. male -> 1 or 男)
         if val_lower in ("male", "m", "男", "男性"):
             for opt in options:

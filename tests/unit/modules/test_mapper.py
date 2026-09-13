@@ -338,3 +338,28 @@ def test_disabled_correction_memory_ignored():
     assert res.profile_path == "contact.mobile"
     assert res.method == "exact_rule"
 
+
+def test_correction_memory_requires_compatible_field_type_and_options():
+    memory = [{
+        "normalized_label": "姓名",
+        "field_type": "file",
+        "options_signature": "old-options",
+        "corrected_semantic_path": "contact.email",
+    }]
+
+    result = FieldMapper.map_field(
+        field_sig="name",
+        normalized_label="姓名",
+        field_type="text",
+        options=["候选人甲"],
+        correction_memories=memory,
+    )
+
+    assert result.profile_path == "identity.name"
+    assert result.method == "exact_rule"
+
+
+def test_grandparent_label_is_not_downgraded_to_parent():
+    result = FieldMapper.map_field("grandfather-name", "祖父姓名")
+    assert result.profile_path is None
+    assert result.method == "unmapped"

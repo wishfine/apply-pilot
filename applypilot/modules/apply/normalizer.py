@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from enum import Enum, StrEnum
+from pathlib import Path
 import re
 from typing import Any, Callable, Optional
 
@@ -17,6 +18,8 @@ class ValueKind(StrEnum):
     PHONE = "phone"
     EMAIL = "email"
     CITY = "city"
+    GENDER = "gender"
+    FILE = "file"
     DATE = "date"
     EDUCATION_LEVEL = "education_level"
     ACADEMIC_DEGREE = "academic_degree"
@@ -398,6 +401,17 @@ def normalize_academic_degree(val: Any) -> Optional[str]:
     return s
 
 
+def normalize_gender(val: Any) -> Optional[str]:
+    if val is None:
+        return None
+    value = str(getattr(val, "value", val)).strip().lower()
+    if value in {"male", "m", "男", "男性"}:
+        return "male"
+    if value in {"female", "f", "女", "女性"}:
+        return "female"
+    return None
+
+
 def normalize_person_name(val: Any) -> Optional[str]:
     """Normalize person names (collapse internal space/dots for CJK, normalize whitespace for Latin)."""
     if val is None:
@@ -540,6 +554,16 @@ def _are_academic_degree_equivalent(observed: str, expected: Any) -> bool:
     return False
 
 
+def _are_gender_equivalent(observed: str, expected: Any) -> bool:
+    return normalize_gender(observed) is not None and normalize_gender(observed) == normalize_gender(expected)
+
+
+def _are_file_equivalent(observed: str, expected: Any) -> bool:
+    if not _is_empty(observed) and not _is_empty(expected):
+        return Path(str(observed)).name == Path(str(expected)).name
+    return False
+
+
 def _are_political_status_equivalent(observed: str, expected: Any) -> bool:
     obs = normalize_political_status(observed)
     exp = normalize_political_status(expected)
@@ -623,6 +647,10 @@ class ValueNormalizerRegistry:
                 return _are_email_equivalent(observed, expected)
             elif kind == ValueKind.CITY:
                 return _are_city_equivalent(observed, expected)
+            elif kind == ValueKind.GENDER:
+                return _are_gender_equivalent(observed, expected)
+            elif kind == ValueKind.FILE:
+                return _are_file_equivalent(observed, expected)
             elif kind == ValueKind.DATE:
                 return _are_date_equivalent(observed, expected)
             elif kind == ValueKind.EDUCATION_LEVEL:

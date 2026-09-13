@@ -102,3 +102,70 @@ async def test_ambiguous_legacy_job_alias_does_not_mix_candidates(tmp_path):
     assert await repo.list_runs_by_application('app_job')==[]
     assert await CheckpointRepository(db).get_latest_checkpoint('app_job') is None
     assert (await repo.get_application('app_a'))['candidate_id']=='a'
+
+
+@pytest.mark.asyncio
+async def test_dynamic_required_field_is_discovered_before_final_review(form):
+    page, run, _ = form
+    await page.set_content('''
+        <input aria-label="姓名" required
+          oninput="if (!document.querySelector('#email')) {
+            const email = document.createElement('input');
+            email.id = 'email'; email.required = true; email.setAttribute('aria-label', '邮箱');
+            document.body.appendChild(email);
+          }">
+        <button>提交申请</button>
+    ''')
+    status, _ = await run({'identity': {'name': '候选人甲'}})
+    assert await page.locator('#email').input_value() == ''
+    assert status == ApplicationStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_required_value_that_cannot_be_overwritten_halts_for_review(form):
+    page, run, _ = form
+    await page.set_content('<input aria-label="姓名" value="其他人乙" readonly required><button>提交申请</button>')
+    status, _ = await run({'identity': {'name': '候选人甲'}})
+    assert await page.locator('input').input_value() == '其他人乙'
+    assert status == ApplicationStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_nested_family_section_is_not_mapped_to_candidate_name(form):
+    page, run, _ = form
+    await page.set_content('''
+        <section><h2>家庭成员</h2>
+          <fieldset><label for="family-name">姓名</label><input id="family-name" required></fieldset>
+        </section>
+        <button>提交申请</button>
+    ''')
+    status, _ = await run({'identity': {'name': '候选人甲'}})
+    assert await page.locator('#family-name').input_value() == ''
+    assert status == ApplicationStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_concrete_academic_degree_does_not_fall_back_to_another_degree(form):
+    page, run, _ = form
+    await page.set_content('''
+        <select aria-label="学位" required>
+          <option value="">请选择</option><option value="science">理学硕士</option>
+          <option value="engineering">工程硕士</option>
+        </select><button>提交申请</button>
+    ''')
+    status, _ = await run({'education': [{
+        'id': 'edu-master', 'school_name': '测试大学', 'education_level': 'master',
+        'academic_degree': '工学硕士', 'major': '计算机科学',
+        'start_date': '2022-09', 'end_date': '2025-06',
+    }]})
+    assert await page.locator('select').input_value() == ''
+    assert status == ApplicationStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_login_page_with_phone_input_pauses_before_filling(form):
+    page, run, _ = form
+    await page.set_content('<h1>请先登录</h1><input aria-label="手机号"><button>提交</button>')
+    status, _ = await run({'contact': {'mobile': '13800138000'}})
+    assert await page.locator('input').input_value() == ''
+    assert status == ApplicationStatus.PAUSED

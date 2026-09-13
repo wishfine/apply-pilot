@@ -47,7 +47,9 @@ def _create_sample_target(provider: str | None = "generic") -> ApplicationTarget
 def _create_mock_browser_and_page():
     mock_browser = AsyncMock()
     mock_page = AsyncMock()
-    mock_page.execute_unsafe_script = AsyncMock(return_value=True)
+    async def script_result(reason, script, *args):
+        return "final submission" in reason.lower()
+    mock_page.execute_unsafe_script = AsyncMock(side_effect=script_result)
     mock_browser.open_page.return_value = mock_page
     mock_browser.wait_for_user = AsyncMock()
     return mock_browser, mock_page
@@ -83,7 +85,7 @@ async def test_readiness_audit_halts_and_prompts_user_when_required_missing(tmp_
     # A prompt alone does not resolve the missing field; no final-review prompt.
     assert mock_browser.wait_for_user.await_count == 1
     prompt_call = mock_browser.wait_for_user.await_args_list[0][0][0]
-    assert "阶段【single_page】存在 1 个必填缺失项：手机号" in prompt_call
+    assert "阶段【single_page】存在 1 个待处理项：手机号" in prompt_call
     assert "请在浏览器中核对补填" in prompt_call
 
 
@@ -416,4 +418,3 @@ async def test_detached_element_does_not_crash_engine(tmp_path: Path):
     # Should safely catch exception on detached element and complete successfully
     status = await engine.run_application_target(target, profile)
     assert status == ApplicationStatus.READY_REVIEW
-

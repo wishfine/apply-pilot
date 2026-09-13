@@ -27,7 +27,7 @@ from applypilot.browser import PlaywrightBackend
 from applypilot.core.config import get_app_home_dir, get_browser_dir, get_db_path
 from applypilot.domain.job import ApplicationStatus, ApplicationTarget, Job
 from applypilot.domain.profile import CandidateProfile
-from applypilot.domain.variant import ResumeVariant
+from applypilot.domain.variant import DisclosurePolicy, ResumeVariant
 from applypilot.modules.apply.engine import ApplyEngine
 from applypilot.modules.apply.readiness import (
     ProfileWritebackSynchronizer,
@@ -268,7 +268,7 @@ def _execute_apply_session(
             table.add_column("表单标签", style="bold")
             table.add_column("所属板块", style="magenta")
             table.add_column("建议修复", style="green")
-            for item in report.missing_required:
+            for item in report.blocking_fields:
                 table.add_row(
                     item.field_sig,
                     item.label,
@@ -284,7 +284,7 @@ def _execute_apply_session(
             if choice == "3":
                 return ApplicationStatus.PAUSED
             elif choice == "2":
-                for item in report.missing_required:
+                for item in report.blocking_fields:
                     val = typer.prompt(f"请输入 [{item.label}]")
                     if val:
                         if item.profile_path:
@@ -512,6 +512,21 @@ def apply_resume(
         canon_job_id = app_data.get("canonical_job_id") or "resumed_job"
         resume_url = (chk_data.get("page_url") if chk_data else None) or "about:blank"
 
+        raw_context = app_data.get("target_context_json")
+        context: dict[str, Any] = {}
+        if raw_context:
+            try:
+                context = json.loads(raw_context)
+            except (TypeError, ValueError):
+                context = {}
+        if context.get("disclosure_policy"):
+            disclosure_policy = DisclosurePolicy.model_validate(context["disclosure_policy"])
+        else:
+            # A legacy record does not prove which data the candidate allowed in
+            # the original run.  Keep automatic disclosure disabled until a new
+            # target context is saved.
+            disclosure_policy = DisclosurePolicy(blocked_field_paths={"*"})
+
         console.print(f"[bold cyan]Resuming application {application_id} at URL: {resume_url}[/bold cyan]")
 
         job = Job(
@@ -527,7 +542,11 @@ def apply_resume(
         target = ApplicationTarget(
             target_id=f"tgt_{canon_job_id.removeprefix('job_')}",
             job=job,
+            platform_type=context.get("platform_type"),
+            provider=context.get("provider"),
             final_form_url=resume_url if resume_url != "about:blank" else None,
+            assigned_variant_id=context.get("assigned_variant_id") or app_data.get("assigned_variant_id"),
+            disclosure_policy=disclosure_policy,
         )
 
         _execute_apply_session(

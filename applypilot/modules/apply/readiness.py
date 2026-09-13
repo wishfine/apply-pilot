@@ -13,6 +13,7 @@ import yaml
 from applypilot.domain.base import TriState
 from applypilot.domain.profile import CandidateProfile
 from applypilot.domain.variant import ResumeVariant
+from applypilot.modules.apply.normalizer import ValueKind, ValueNormalizerRegistry
 
 
 def _is_meaningful_value(val: Any) -> bool:
@@ -112,6 +113,7 @@ class FieldReadinessStatus(StrEnum):
     FILLED = "filled"
     OPTIONAL_EMPTY = "optional_empty"
     REQUIRED_MISSING = "required_missing"
+    CONFLICT = "conflict"
 
 
 class FieldReadinessItem(BaseModel):
@@ -132,10 +134,16 @@ class ReadinessReport(BaseModel):
 
     is_ready: bool
     missing_required: list[FieldReadinessItem] = Field(default_factory=list)
+    conflicting_fields: list[FieldReadinessItem] = Field(default_factory=list)
     total_fields: int = 0
     filled_fields: int = 0
     optional_empty_fields: int = 0
     all_items: list[FieldReadinessItem] = Field(default_factory=list)
+
+    @property
+    def blocking_fields(self) -> list[FieldReadinessItem]:
+        """Fields that must be resolved before a person can review submission."""
+        return [*self.missing_required, *self.conflicting_fields]
 
 
 class ReadinessAuditor:
@@ -185,8 +193,23 @@ class ReadinessAuditor:
             if _is_meaningful_value(observed_value) and field.get("is_valid") is not False:
                 is_filled = True
 
+            expected_value = field.get("expected_value")
+            value_kind = field.get("value_kind", ValueKind.PLAIN_TEXT)
+            expected_mismatch = False
+            if expected_value is not None and _is_meaningful_value(observed_value):
+                expected_mismatch = not ValueNormalizerRegistry.are_equivalent(
+                    value_kind, str(observed_value), expected_value
+                )
+            fill_failed = bool(field.get("fill_failed"))
+
             # Determine status
-            if is_filled:
+            if fill_failed or expected_mismatch:
+                status = FieldReadinessStatus.CONFLICT
+                if fill_failed:
+                    suggested_fix = f"自动填写 '{label}' 未成功，请在浏览器中核对并手动处理"
+                else:
+                    suggested_fix = f"'{label}' 当前值与档案值不一致，请在浏览器中核对"
+            elif is_filled:
                 status = FieldReadinessStatus.FILLED
                 suggested_fix = None
             elif is_required:
@@ -214,17 +237,21 @@ class ReadinessAuditor:
         missing_required = [
             item for item in all_items if item.status == FieldReadinessStatus.REQUIRED_MISSING
         ]
+        conflicting_fields = [
+            item for item in all_items if item.status == FieldReadinessStatus.CONFLICT
+        ]
         filled_fields = sum(
             1 for item in all_items if item.status == FieldReadinessStatus.FILLED
         )
         optional_empty_fields = sum(
             1 for item in all_items if item.status == FieldReadinessStatus.OPTIONAL_EMPTY
         )
-        is_ready = len(missing_required) == 0
+        is_ready = len(missing_required) == 0 and len(conflicting_fields) == 0
 
         return ReadinessReport(
             is_ready=is_ready,
             missing_required=missing_required,
+            conflicting_fields=conflicting_fields,
             total_fields=len(all_items),
             filled_fields=filled_fields,
             optional_empty_fields=optional_empty_fields,

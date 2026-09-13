@@ -49,7 +49,9 @@ def _create_sample_target(provider: str | None = "generic") -> ApplicationTarget
 def _create_mock_browser_and_page():
     mock_browser = AsyncMock()
     mock_page = AsyncMock()
-    mock_page.execute_unsafe_script = AsyncMock(return_value=True)
+    async def script_result(reason, script, *args):
+        return "final submission" in reason.lower()
+    mock_page.execute_unsafe_script = AsyncMock(side_effect=script_result)
     mock_browser.open_page.return_value = mock_page
     mock_browser.wait_for_user = AsyncMock()
     return mock_browser, mock_page
@@ -499,3 +501,65 @@ async def test_correction_memory_wiring(tmp_path: Path):
             assert rows[0]["confidence"] == 0.99
 
 
+@pytest.mark.asyncio
+async def test_correction_memory_does_not_cross_target_tenant(tmp_path: Path):
+    db_file = tmp_path / "tenant_scope.db"
+    await init_db(db_file)
+    mock_browser, mock_page = _create_mock_browser_and_page()
+
+    mock_el = AsyncMock()
+    mock_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {
+            "name": "姓名",
+            "type": "text",
+            "id": "name_field",
+        }.get(attr)
+    )
+    mock_el.get_text = AsyncMock(return_value="")
+    mock_page.find_all = AsyncMock(return_value=[mock_el])
+
+    from applypilot.storage.repositories import CorrectionRepository
+
+    await CorrectionRepository(db_file).save_correction(
+        correction_id="company_a_name",
+        provider="generic",
+        tenant_hint="company-a.example",
+        normalized_label="姓名",
+        field_type="text",
+        corrected_semantic_path="contact.email",
+    )
+
+    target = _create_sample_target(provider="generic")
+    target.job.apply_url = "https://company-b.example/apply"
+    engine = ApplyEngine(db_path=db_file, browser_backend=mock_browser)
+    status = await engine.run_application_target(target, _create_sample_profile())
+
+    assert status == ApplicationStatus.READY_REVIEW
+    mock_el.type_text.assert_awaited_once_with("张三")
+
+
+@pytest.mark.asyncio
+async def test_engine_persists_target_context_for_later_resume(tmp_path: Path):
+    db_file = tmp_path / "target_context.db"
+    await init_db(db_file)
+    mock_browser, mock_page = _create_mock_browser_and_page()
+    mock_page.find_all = AsyncMock(return_value=[])
+
+    from applypilot.domain.variant import DisclosurePolicy
+
+    target = _create_sample_target(provider="generic")
+    target.platform_type = "company"
+    target.assigned_variant_id = "variant-1"
+    target.disclosure_policy = DisclosurePolicy(blocked_field_paths={"contact.email"})
+    engine = ApplyEngine(db_path=db_file, browser_backend=mock_browser)
+
+    await engine.run_application_target(target, _create_sample_profile())
+
+    app = await engine.app_repo.get_application_by_key(
+        f"cand_test_001:{target.job.job_id}:default"
+    )
+    context = __import__("json").loads(app["target_context_json"])
+    assert context["provider"] == "generic"
+    assert context["platform_type"] == "company"
+    assert context["assigned_variant_id"] == "variant-1"
+    assert context["disclosure_policy"]["blocked_field_paths"] == ["contact.email"]

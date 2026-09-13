@@ -100,6 +100,9 @@ class PlaywrightElement:
                     || container?.querySelector('label')?.textContent?.trim()
                     || el.title || el.getAttribute('placeholder') || el.name || el.id || '';
                 let observed = el.value ?? '';
+                if (el.tagName.toLowerCase() === 'select') {
+                    observed = el.selectedOptions?.[0]?.textContent?.trim() || el.value || '';
+                }
                 let required = el.required || el.getAttribute('aria-required') === 'true';
                 if (el.type === 'radio') {
                     const group = el.name ? Array.from(el.getRootNode().querySelectorAll('input[type=radio]'))
@@ -114,13 +117,22 @@ class PlaywrightElement:
                     observed = el.files.length ? Array.from(el.files, f => f.name).join(', ') : null;
                 }
                 if (required) attrs.required = '';
-                const group = el.closest('fieldset, section, [role="group"]');
-                const sectionTitle = group?.querySelector(':scope > legend, :scope > h2, :scope > h3, :scope > h4')?.textContent?.trim()
-                    || group?.getAttribute('aria-label') || '';
+                let sectionTitle = '';
+                for (let group = el.parentElement; group && !sectionTitle; group = group.parentElement) {
+                    sectionTitle = group.querySelector(':scope > legend, :scope > h2, :scope > h3, :scope > h4')?.textContent?.trim()
+                        || group.getAttribute('aria-label') || '';
+                }
+                const options = el.tagName.toLowerCase() === 'select'
+                    ? Array.from(el.options).map(option => ({
+                        value: (option.value || '').trim(),
+                        text: (option.textContent || option.text || '').trim(),
+                        label: (option.label || '').trim(),
+                    }))
+                    : null;
                 return {section_title: sectionTitle, tag: el.tagName.toLowerCase(), type: el.type || '', label,
                     field_sig: el.id || el.name || label, element_attrs: attrs,
                     outer_html: (container || el).outerHTML, observed_value: observed,
-                    is_active: !!active, is_valid: el.validity ? el.validity.valid : true};
+                    options, is_active: !!active, is_valid: el.validity ? el.validity.valid : true};
             }""", timeout=self._policy.action_timeout_ms)
         except Exception as e:
             raise BrowserDriverError(f"inspect_field failed: {e}") from e
