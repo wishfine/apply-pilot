@@ -144,7 +144,7 @@ class ValueResolver:
                     ):
                         if not isinstance(curr, (list, tuple)) or not curr:
                             return None
-                        matched = None
+                        matching: list[Any] = []
                         target_levels = {
                             "bachelor": (EducationLevel.BACHELOR, "bachelor"),
                             "undergraduate": (EducationLevel.BACHELOR, "bachelor"),
@@ -163,13 +163,16 @@ class ValueResolver:
                         for item in curr:
                             item_lvl = _get_val(item, "education_level")
                             if item_lvl in target_levels or (hasattr(item_lvl, "value") and item_lvl.value in target_levels):
-                                matched = item
-                                break
+                                matching.append(item)
+                                continue
                             if _get_val(item, "id") in (f"edu_{val}", val):
-                                matched = item
-                                break
-                        if matched is not None:
-                            curr = matched
+                                matching.append(item)
+                        if matching:
+                            # A profile can contain multiple records at one
+                            # level (transfers, repeated degrees).  Resolve
+                            # the most recent/highest-quality matching record
+                            # instead of whichever happens to be first.
+                            curr = cls._resolve_highest_education(matching)
                         else:
                             return None
                     elif val in ("father", "mother", "spouse", "child", "父亲", "母亲", "配偶", "子女"):
@@ -229,6 +232,23 @@ class ValueResolver:
                                         matched = item
                                         break
                                 if matched is not None:
+                                    # An explicit asset selector is still
+                                    # subject to the semantic request.  A
+                                    # resume path must never resolve an asset
+                                    # whose declared type is a transcript,
+                                    # certificate, or another document.
+                                    if any(
+                                        hasattr(item, "asset_type")
+                                        or (isinstance(item, dict) and "asset_type" in item)
+                                        for item in curr
+                                    ):
+                                        requested = str(val).lower()
+                                        asset_type = str(_get_val(matched, "asset_type") or "").lower()
+                                        if (
+                                            ("resume" in requested or "cv" in requested or "简历" in requested)
+                                            and asset_type not in ("resume", "resume_pdf")
+                                        ):
+                                            return None
                                     curr = matched
                                 else:
                                     # Fallback for assets: strictly enforce asset type

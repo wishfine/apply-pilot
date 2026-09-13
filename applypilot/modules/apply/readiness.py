@@ -202,10 +202,17 @@ class ReadinessAuditor:
                 )
             fill_failed = bool(field.get("fill_failed"))
 
+            # Native/custom browser validity is a hard safety signal even for
+            # optional controls.  An invalid value must never be presented as
+            # ready for human review.
+            invalid_value = field.get("is_valid") is False
+
             # Determine status
-            if fill_failed or expected_mismatch:
+            if invalid_value or fill_failed or expected_mismatch:
                 status = FieldReadinessStatus.CONFLICT
-                if fill_failed:
+                if invalid_value:
+                    suggested_fix = f"'{label}' 当前值未通过网页校验，请在浏览器中修正"
+                elif fill_failed:
                     suggested_fix = f"自动填写 '{label}' 未成功，请在浏览器中核对并手动处理"
                 else:
                     suggested_fix = f"'{label}' 当前值与档案值不一致，请在浏览器中核对"
@@ -315,4 +322,12 @@ class ProfileWritebackSynchronizer:
         )
         tmp_path = path.with_suffix(f"{path.suffix}.tmp")
         tmp_path.write_text(serialized, encoding="utf-8")
+        try:
+            tmp_path.chmod(0o600)
+        except OSError:
+            pass
         tmp_path.replace(path)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass

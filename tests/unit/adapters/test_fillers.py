@@ -329,6 +329,24 @@ async def test_radio_filler_uses_field_info_label():
 
 
 @pytest.mark.asyncio
+async def test_radio_filler_matches_numeric_gender_by_option_label():
+    filler = RadioCheckboxFiller()
+    element = AsyncMock()
+    element.click = AsyncMock()
+    element.get_attribute = AsyncMock(
+        side_effect=lambda attr: {"type": "radio", "value": "1"}.get(attr)
+    )
+    element.get_text = AsyncMock(return_value="")
+    element.is_checked = AsyncMock(return_value=False)
+    result = await filler.fill(
+        AsyncMock(), element, "male",
+        field_info={"field_type": "radio", "type": "radio", "label": "性别", "option_label": "男"},
+    )
+    assert result.action_type == "click"
+    element.click.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_base_adapter_forwards_field_info_to_filler():
     adapter = GenericApplicationAdapter()
     mock_page = AsyncMock()
@@ -511,7 +529,6 @@ def test_field_mapper_resume_upload_rules():
         "简历上传",
         "个人简历",
         "附件简历",
-        "上传附件",
         "简历",
         "resume",
         "cv",

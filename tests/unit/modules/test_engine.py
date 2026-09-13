@@ -563,3 +563,58 @@ async def test_engine_persists_target_context_for_later_resume(tmp_path: Path):
     assert context["platform_type"] == "company"
     assert context["assigned_variant_id"] == "variant-1"
     assert context["disclosure_policy"]["blocked_field_paths"] == ["contact.email"]
+
+    target.disclosure_policy = DisclosurePolicy(allow_sensitive=False)
+    await engine.run_application_target(target, _create_sample_profile())
+    app = await engine.app_repo.get_application_by_key(
+        f"cand_test_001:{target.job.job_id}:default"
+    )
+    refreshed = __import__("json").loads(app["target_context_json"])
+    assert refreshed["disclosure_policy"]["allow_sensitive"] is False
+
+
+@pytest.mark.asyncio
+async def test_field_structure_signature_includes_live_descriptor_changes(tmp_path: Path):
+    engine = ApplyEngine(db_path=tmp_path / "sig.db", browser_backend=AsyncMock())
+
+    class Element:
+        def __init__(self, state):
+            self.state = state
+
+        async def inspect_field(self):
+            return self.state
+
+    state = {"field_sig": "same", "label": "姓名", "tag": "input", "type": "text",
+             "section_title": "基本信息", "options": None, "is_active": True}
+    page = AsyncMock()
+    page.find_all = AsyncMock(return_value=[Element(state)])
+    assert await engine._field_structure_changed(page, [{**state}]) is False
+    state["label"] = "手机号"
+    assert await engine._field_structure_changed(
+        page, [{"field_sig": "same", "label": "姓名", "tag": "input", "type": "text",
+                "section_title": "基本信息", "options": None}]
+    ) is True
+
+
+@pytest.mark.asyncio
+async def test_engine_does_not_restart_submitted_application(tmp_path: Path):
+    db_file = tmp_path / "terminal.db"
+    await init_db(db_file)
+    browser, _ = _create_mock_browser_and_page()
+    profile = _create_sample_profile()
+    target = _create_sample_target(provider="generic")
+    engine = ApplyEngine(db_path=db_file, browser_backend=browser)
+    app_id = "app_terminal"
+    await engine.app_repo.create_application(
+        app_id=app_id,
+        application_key=f"{profile.profile_id}:{target.job.job_id}:default",
+        candidate_id=profile.profile_id,
+        canonical_job_id=target.job.job_id,
+        company_name=target.job.company_name,
+        job_title=target.job.title,
+        status=ApplicationStatus.SUBMITTED,
+    )
+    with pytest.raises(RuntimeError, match="terminal"):
+        await engine.run_application_target(target, profile)
+    app = await engine.app_repo.get_application(app_id)
+    assert app["status"] == ApplicationStatus.SUBMITTED

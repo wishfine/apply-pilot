@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 from urllib.parse import urlparse
 import uuid
-from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -177,8 +176,30 @@ class ApplyEngine:
                 return False
         return False
 
+    @staticmethod
+    def _descriptor_signature(state: dict[str, Any]) -> str:
+        """Stable signature for a control's structure, excluding mutable value."""
+        required = state.get("is_required")
+        if required is None:
+            required = FormRequirementDetector.is_field_required(
+                element_attrs=state.get("element_attrs") or {},
+                label=state.get("label"),
+                outer_html=state.get("outer_html"),
+            )
+        descriptor = {
+            "field_sig": state.get("field_sig"),
+            "label": state.get("label"),
+            "section_title": state.get("section_title"),
+            "tag": state.get("tag"),
+            "type": state.get("type"),
+            "is_required": bool(required),
+            "option_label": state.get("option_label"),
+            "options": state.get("options"),
+        }
+        return json.dumps(descriptor, ensure_ascii=False, sort_keys=True, default=str)
+
     async def _active_field_signatures(self, page: Any) -> list[str]:
-        """Return signatures for the currently active controls on the page."""
+        """Return complete structural signatures for active controls."""
         if not hasattr(page, "find_all"):
             return []
         elements = await page.find_all("input:not([type='hidden']), select, textarea")
@@ -189,15 +210,33 @@ class ApplyEngine:
                 if live_state is not None:
                     if live_state.get("is_active") is False:
                         continue
-                    signature = live_state.get("field_sig")
+                    signature = self._descriptor_signature(live_state)
                 else:
                     signature = None
+                    fallback_state: dict[str, Any] = {}
                     if hasattr(element, "get_attribute"):
-                        for attr in ("id", "name", "aria-label", "placeholder"):
+                        attrs: dict[str, Any] = {}
+                        for attr in ("id", "name", "aria-label", "placeholder", "title", "type", "required", "aria-required"):
                             value = await element.get_attribute(attr)
+                            attrs[attr] = value
+                        fallback_state["element_attrs"] = {
+                            key: value for key, value in attrs.items() if value is not None
+                        }
+                        fallback_state["label"] = (
+                            attrs.get("aria-label") or attrs.get("title")
+                            or attrs.get("name") or attrs.get("placeholder")
+                            or attrs.get("id") or ""
+                        )
+                        fallback_state["type"] = attrs.get("type") or "text"
+                        fallback_state["tag"] = ""
+                        for attr in ("id", "name", "aria-label", "placeholder"):
+                            value = attrs.get(attr)
                             if isinstance(value, str) and value.strip():
                                 signature = value
                                 break
+                    fallback_state["field_sig"] = signature or f"unnamed-{index}"
+                    fallback_state["options"] = None
+                    signature = self._descriptor_signature(fallback_state)
                 signatures.append(str(signature or f"unnamed-{index}"))
             except Exception:
                 # A detached locator was already ignored by the scanning loop;
@@ -207,8 +246,11 @@ class ApplyEngine:
 
     async def _field_structure_changed(self, page: Any, fields: list[dict[str, Any]]) -> bool:
         current = await self._active_field_signatures(page)
-        scanned = [str(field.get("field_sig") or "") for field in fields]
-        return Counter(current) != Counter(scanned)
+        scanned = [
+            str(field.get("structure_signature") or self._descriptor_signature(field))
+            for field in fields
+        ]
+        return sorted(current) != sorted(scanned)
 
     async def _pause_application(self, app_id: str, run_id: str, url: str,
                                  stage: str, snapshot_id: str) -> ApplicationStatus:
@@ -229,6 +271,9 @@ class ApplyEngine:
     ) -> ApplicationStatus:
         """Execute the multi-stage form application state machine for a target job."""
         run_id: Optional[str] = None
+        app_id: Optional[str] = None
+        target_url = target.final_form_url or target.job.apply_url
+        current_stage: Optional[str] = None
         try:
             # -----------------------------------------------------------------
             # a. Application Record Management
@@ -246,8 +291,18 @@ class ApplyEngine:
             existing_app = await self.app_repo.get_application_by_key(app_key)
             if existing_app:
                 app_id = existing_app["id"]
-                if not existing_app.get("target_context_json"):
-                    await self.app_repo.update_target_context(app_id, target_context)
+                existing_status = str(existing_app.get("status") or "")
+                if existing_status in {
+                    ApplicationStatus.SUBMITTED,
+                    ApplicationStatus.WITHDRAWN,
+                    ApplicationStatus.EXPIRED,
+                }:
+                    raise RuntimeError(
+                        f"Application {app_id} is terminal ({existing_status}) and cannot be restarted"
+                    )
+                # Authorization is run-specific.  Always persist the current
+                # target policy so revoked disclosure cannot survive a rerun.
+                await self.app_repo.update_target_context(app_id, target_context)
             else:
                 app_id = "app_" + hashlib.sha256(app_key.encode()).hexdigest()[:24]
                 await self.app_repo.create_application(
@@ -346,7 +401,6 @@ class ApplyEngine:
             # -----------------------------------------------------------------
             # c. Navigation & Platform Adapter Selection
             # -----------------------------------------------------------------
-            target_url = target.final_form_url or target.job.apply_url
             page = await self.browser.open_page(target_url)
             if callable(getattr(type(page), "url", None)):
                 actual_url = await page.url()
@@ -610,6 +664,7 @@ class ApplyEngine:
                                                 "field_type": field_type,
                                                 "field_sig": field_sig,
                                                 "label": label,
+                                                "option_label": live_state.get("option_label") if live_state else None,
                                                 "type": type_str,
                                                 "tag": tag_str,
                                             },
@@ -659,7 +714,7 @@ class ApplyEngine:
                             stage_scanned_fields.append({
                                 "field_sig": field_sig,
                                 "label": label,
-                                "section_title": (live_state.get("section_title") or current_stage) if live_state else current_stage,
+                                "section_title": (live_state.get("section_title") or current_stage) if live_state else None,
                                 "is_required": is_required,
                                 "mapped_path": path,
                                 "observed_value": observed,
@@ -668,6 +723,21 @@ class ApplyEngine:
                                 "expected_value": expected,
                                 "value_kind": kind,
                                 "fill_failed": fill_failed,
+                                "tag": tag_str,
+                                "type": type_str,
+                                "options": live_state.get("options") if live_state else None,
+                                "structure_signature": self._descriptor_signature(
+                                    {
+                                        "field_sig": field_sig,
+                                        "label": label,
+                                        "section_title": live_state.get("section_title") if live_state else None,
+                                        "tag": tag_str,
+                                        "type": type_str,
+                                        "is_required": is_required,
+                                        "option_label": live_state.get("option_label") if live_state else None,
+                                        "options": live_state.get("options") if live_state else None,
+                                    }
+                                ),
                             })
                         except Exception as e:
                             logger.warning(
@@ -676,6 +746,21 @@ class ApplyEngine:
                                 e,
                             )
                             continue
+
+                # Persist the actual post-scan metadata and fingerprint rather
+                # than the old placeholder snapshot created before inspection.
+                dom_fingerprint = hashlib.sha256(
+                    json.dumps(
+                        [field.get("structure_signature") for field in stage_scanned_fields],
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ).encode("utf-8")
+                ).hexdigest()
+                await self.snap_repo.update_snapshot(
+                    snapshot_id=snap_id,
+                    dom_fingerprint=dom_fingerprint,
+                    fields_meta_json=stage_scanned_fields,
+                )
 
                 # Re-read all controls after filling, including radio groups.
                 await self._refresh_readiness(stage_scanned_fields, scanned_elements)
@@ -879,6 +964,22 @@ class ApplyEngine:
                         event_type="RUN_FAILED",
                         payload_json={"error": str(e)},
                     )
+                if app_id is not None:
+                    app_rec = await self.app_repo.get_application(app_id)
+                    if app_rec and app_rec.get("status") == ApplicationStatus.IN_PROGRESS:
+                        await self.app_repo.update_status(
+                            app_id, ApplicationStatus.PAUSED,
+                            current_stage=app_rec.get("current_stage"),
+                        )
+                        await self.chk_repo.save_checkpoint(
+                            checkpoint_id=f"chk_{uuid.uuid4().hex[:12]}",
+                            application_id=app_id,
+                            run_id=run_id,
+                            page_url=target_url,
+                            stage_key=current_stage or "error",
+                            snapshot_id=None,
+                            status="paused",
+                        )
             raise
 
 

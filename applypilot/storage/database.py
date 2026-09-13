@@ -21,3 +21,13 @@ async def init_db(db_path: Union[Path, str]) -> None:
         if "target_context_json" not in columns:
             await db.execute("ALTER TABLE applications ADD COLUMN target_context_json TEXT")
         await db.commit()
+    # Candidate facts, application history and browser state are sensitive.
+    # Tighten permissions after SQLite has created the database file.
+    try:
+        path.chmod(0o600)
+        for suffix in ("-wal", "-shm"):
+            sidecar = Path(f"{path}{suffix}")
+            if sidecar.exists():
+                sidecar.chmod(0o600)
+    except OSError:
+        pass

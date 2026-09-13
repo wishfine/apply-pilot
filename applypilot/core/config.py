@@ -7,6 +7,10 @@ def get_app_home_dir() -> Path:
     env_home = os.getenv("APPLYPILOT_HOME")
     base = Path(env_home) if env_home else Path(user_data_dir("ApplyPilot", "ApplyPilot"))
     base.mkdir(parents=True, exist_ok=True)
+    try:
+        base.chmod(0o700)
+    except OSError:
+        pass
     return base
 
 def get_db_path() -> Path:
@@ -15,6 +19,10 @@ def get_db_path() -> Path:
 def get_browser_dir() -> Path:
     browser_dir = get_app_home_dir() / "browser_profile"
     browser_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        browser_dir.chmod(0o700)
+    except OSError:
+        pass
     return browser_dir
 
 class ApplyPilotConfig(BaseModel):

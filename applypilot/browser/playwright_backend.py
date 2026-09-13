@@ -104,10 +104,15 @@ class PlaywrightElement:
                     observed = el.selectedOptions?.[0]?.textContent?.trim() || el.value || '';
                 }
                 let required = el.required || el.getAttribute('aria-required') === 'true';
+                let optionLabel = '';
                 if (el.type === 'radio') {
                     const group = el.name ? Array.from(el.getRootNode().querySelectorAll('input[type=radio]'))
                         .filter(x => x.name === el.name && x.form === el.form) : [el];
-                    observed = group.find(x => x.checked)?.value ?? null;
+                    const selected = group.find(x => x.checked);
+                    observed = selected
+                        ? (Array.from(selected.labels || [], l => l.textContent.trim()).join(' ') || selected.value)
+                        : null;
+                    optionLabel = labelText;
                     required = required || group.some(x => x.required);
                     label = el.closest('fieldset')?.querySelector('legend')?.textContent?.trim()
                         || el.getAttribute('aria-label') || labelledBy || el.name || label;
@@ -132,7 +137,7 @@ class PlaywrightElement:
                 return {section_title: sectionTitle, tag: el.tagName.toLowerCase(), type: el.type || '', label,
                     field_sig: el.id || el.name || label, element_attrs: attrs,
                     outer_html: (container || el).outerHTML, observed_value: observed,
-                    options, is_active: !!active, is_valid: el.validity ? el.validity.valid : true};
+                    option_label: optionLabel, options, is_active: !!active, is_valid: el.validity ? el.validity.valid : true};
             }""", timeout=self._policy.action_timeout_ms)
         except Exception as e:
             raise BrowserDriverError(f"inspect_field failed: {e}") from e

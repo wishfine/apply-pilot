@@ -43,6 +43,16 @@ def test_field_readiness_enums_and_models():
     assert item.status == FieldReadinessStatus.FILLED
 
 
+def test_invalid_optional_value_blocks_readiness(sample_profile: CandidateProfile):
+    report = ReadinessAuditor.audit_fields(
+        [{"field_sig": "email", "label": "备注", "is_required": False,
+          "observed_value": "not-an-email", "is_valid": False}],
+        sample_profile,
+    )
+    assert report.is_ready is False
+    assert report.conflicting_fields[0].status == FieldReadinessStatus.CONFLICT
+
+
 def test_readiness_auditor_all_required_filled(sample_profile: CandidateProfile):
     scanned_fields = [
         {

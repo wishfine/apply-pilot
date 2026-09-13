@@ -429,6 +429,32 @@ class SnapshotRepository:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
 
+    async def update_snapshot(
+        self,
+        snapshot_id: str,
+        *,
+        dom_fingerprint: Optional[str] = None,
+        fields_meta_json: Optional[Union[str, Dict[str, Any], List[Any]]] = None,
+    ) -> None:
+        """Materialize metadata collected after the initial snapshot row."""
+        updates: list[str] = []
+        params: list[Any] = []
+        if dom_fingerprint is not None:
+            updates.append("dom_fingerprint = ?")
+            params.append(dom_fingerprint)
+        if fields_meta_json is not None:
+            updates.append("fields_meta_json = ?")
+            params.append(_to_json_str(fields_meta_json))
+        if not updates:
+            return
+        params.append(snapshot_id)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                f"UPDATE form_snapshots SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+            await db.commit()
+
     async def save_field_mapping(
         self,
         mapping_id: str,

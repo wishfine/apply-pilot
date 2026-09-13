@@ -26,6 +26,7 @@ def test_app_home_dir_env_override(monkeypatch, tmp_path):
     assert home == tmp_path / "custom_home"
     assert home.exists()
     assert home.is_dir()
+    assert home.stat().st_mode & 0o777 == 0o700
 
 
 def test_db_path_under_home():

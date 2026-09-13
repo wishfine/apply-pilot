@@ -43,6 +43,16 @@ def test_mapper_emergency_contact_context():
     assert r_em_phone.profile_path == "contact.emergency_contact_phone"
 
 
+@pytest.mark.parametrize("label", ["导师姓名", "推荐人电话", "证明人邮箱", "实习城市"])
+def test_mapper_does_not_map_third_party_context_to_candidate(label: str):
+    result = FieldMapper.map_field("third_party", label)
+    assert result.profile_path is None
+
+
+def test_generic_attachment_label_requires_manual_mapping():
+    assert FieldMapper.map_field("attachment", "上传附件", field_type="file").profile_path is None
+
+
 def test_mapper_education_level_context():
     # Bachelor context
     r_bachelor_school = FieldMapper.map_field("sig_b_school", "本科毕业院校")

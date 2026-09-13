@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import os
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -168,12 +169,16 @@ def profile_import(
 
     try:
         profile = asyncio.run(service.parse_file(file))
-        yaml_str = yaml.safe_dump(
-            profile.model_dump(mode="json", exclude_none=True),
-            allow_unicode=True,
-            sort_keys=False,
-        )
-        output_path.write_text(yaml_str, encoding="utf-8")
+        profile_data = profile.model_dump(mode="json", exclude_none=True)
+        if output_path.suffix.lower() == ".json":
+            serialized = json.dumps(profile_data, ensure_ascii=False, indent=2) + "\n"
+        else:
+            serialized = yaml.safe_dump(profile_data, allow_unicode=True, sort_keys=False)
+        output_path.write_text(serialized, encoding="utf-8")
+        try:
+            output_path.chmod(0o600)
+        except OSError:
+            pass
 
         console.print(f"[bold green]Profile successfully imported to: {output_path}[/bold green]")
         console.print(
@@ -221,9 +226,28 @@ def _update_in_memory_profile(prof: Any, path: str, val: Any) -> None:
             return
     last_key = parts[-1]
     if hasattr(target, last_key):
+        old_value = getattr(target, last_key)
         setattr(target, last_key, val)
+        try:
+            CandidateProfile.model_validate(prof.model_dump(mode="json"))
+        except Exception:
+            setattr(target, last_key, old_value)
+            raise
     elif isinstance(target, dict):
+        old_value = target.get(last_key)
         target[last_key] = val
+        # Some callers use a deliberately partial dict while constructing a
+        # profile.  Validate complete CandidateProfile instances (the CLI
+        # resolver path) while keeping partial construction helpers usable.
+        if isinstance(prof, CandidateProfile) or "profile_id" in prof:
+            try:
+                CandidateProfile.model_validate(prof)
+            except Exception:
+                if old_value is None:
+                    target.pop(last_key, None)
+                else:
+                    target[last_key] = old_value
+                raise
 
 
 def _canonical_job_id_from_url(url: str) -> str:
@@ -287,6 +311,7 @@ def _execute_apply_session(
                 for item in report.blocking_fields:
                     val = typer.prompt(f"请输入 [{item.label}]")
                     if val:
+                        writeback_ok = True
                         if item.profile_path:
                             try:
                                 ProfileWritebackSynchronizer.sync_field(
@@ -297,11 +322,17 @@ def _execute_apply_session(
                                 )
                             except Exception as e:
                                 console.print(f"[yellow]回写失败: {e}[/yellow]")
+                                writeback_ok = False
 
-                            try:
-                                _update_in_memory_profile(prof, item.profile_path, val)
-                            except Exception:
-                                pass
+                            if writeback_ok:
+                                try:
+                                    _update_in_memory_profile(prof, item.profile_path, val)
+                                except Exception as e:
+                                    console.print(f"[yellow]档案校验失败，未写入页面: {e}[/yellow]")
+                                    writeback_ok = False
+
+                        if not writeback_ok:
+                            continue
 
                         # Fill into DOM page element if element is accessible
                         if page is not None and hasattr(page, "find"):

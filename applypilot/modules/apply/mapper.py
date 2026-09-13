@@ -110,7 +110,6 @@ CANONICAL_EXACT_RULES: dict[str, str] = {
     "简历上传": "assets[asset_resume_pdf].file_path",
     "个人简历": "assets[asset_resume_pdf].file_path",
     "附件简历": "assets[asset_resume_pdf].file_path",
-    "上传附件": "assets[asset_resume_pdf].file_path",
     "简历": "assets[asset_resume_pdf].file_path",
     "resume": "assets[asset_resume_pdf].file_path",
     "cv": "assets[asset_resume_pdf].file_path",
@@ -343,6 +342,16 @@ class FieldMapper:
         # -----------------------------------------------------------------
         # Tier 3: Semantic / Keyword Heuristics
         # -----------------------------------------------------------------
+        # These labels refer to another person or to a job/placement context.
+        # Mapping them to the candidate's identity/contact would silently put
+        # the wrong facts into a form, so leave them for manual mapping.
+        third_party_context = (
+            "导师", "推荐人", "证明人", "证明人", "上级", "领导", "同事",
+            "指导老师", "联系人", "实习", "工作经历", "任职", "供职",
+        )
+        if any(token in clean_key for token in third_party_context):
+            return FieldMappingResult(profile_path=None, method="unmapped", confidence=0.0)
+
         # Resume attachment heuristics
         if "简历" in clean_key or "resume" in clean_key or "cv" in clean_key:
             return FieldMappingResult(

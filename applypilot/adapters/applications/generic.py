@@ -134,8 +134,34 @@ class DateInputFiller:
 
     @staticmethod
     def format_date_value(value: Any, input_type: str = "date") -> str:
-        """Format candidate date fact to standard YYYY-MM-DD or YYYY-MM."""
+        """Format date-like values according to the HTML input type."""
         from applypilot.modules.apply.normalizer import parse_date_components
+
+        input_type = (input_type or "date").strip().lower()
+        if input_type == "time":
+            if hasattr(value, "strftime"):
+                try:
+                    return value.strftime("%H:%M")
+                except Exception:
+                    pass
+            match = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?\b", str(value or ""))
+            return f"{int(match.group(1)):02d}:{match.group(2)}" if match else ""
+        if input_type in ("datetime-local", "datetime"):
+            if hasattr(value, "strftime"):
+                try:
+                    return value.strftime("%Y-%m-%dT%H:%M")
+                except Exception:
+                    pass
+            match = re.search(
+                r"(\d{4}[-/.]\d{1,2}[-/.]\d{1,2})[ T](\d{1,2}:\d{2})",
+                str(value or ""),
+            )
+            if match:
+                date_part = re.sub(r"[/.]", "-", match.group(1))
+                y, m, d = (int(x) for x in date_part.split("-"))
+                hh, mm = (int(x) for x in match.group(2).split(":"))
+                return f"{y:04d}-{m:02d}-{d:02d}T{hh:02d}:{mm:02d}"
+            return ""
 
         parsed = parse_date_components(value)
         if parsed is not None:
@@ -584,6 +610,7 @@ def _option_matches(candidate: Optional[str], target: Any) -> bool:
         ValueKind.POLITICAL_STATUS,
         ValueKind.ACADEMIC_DEGREE,
         ValueKind.CITY,
+        ValueKind.GENDER,
     ):
         try:
             if ValueNormalizerRegistry.are_equivalent(kind, cand_str, target_val):
@@ -645,7 +672,9 @@ class RadioCheckboxFiller:
         elem_val = await _get_attr(element, "value")
         elem_text = await _get_element_text(element)
         if not elem_text and field_info:
-            elem_text = str(field_info.get("label") or "").strip()
+            elem_text = str(
+                field_info.get("option_label") or field_info.get("label") or ""
+            ).strip()
         is_checked = await _is_element_checked(element)
 
         from applypilot.modules.apply.normalizer import normalize_boolean

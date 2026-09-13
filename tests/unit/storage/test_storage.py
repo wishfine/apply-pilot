@@ -56,6 +56,7 @@ async def _create_test_run(
 async def test_init_db_and_foreign_keys(tmp_path: Path):
     db_file = tmp_path / "test.db"
     await init_db(db_file)
+    assert db_file.stat().st_mode & 0o777 == 0o600
 
     async with aiosqlite.connect(db_file) as db:
         await db.execute("PRAGMA foreign_keys = ON;")

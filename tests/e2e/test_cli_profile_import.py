@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from unittest.mock import AsyncMock, patch
 from typer.testing import CliRunner
 import yaml
@@ -121,6 +122,21 @@ def test_profile_import_success(tmp_path: Path):
         assert len(validated.experiences) == 1
         assert len(validated.projects) == 1
         assert len(validated.skills) == 1
+
+
+def test_profile_import_json_output_is_valid_json(tmp_path: Path):
+    resume_file = tmp_path / "resume.tex"
+    resume_file.write_text(r"\\textbf{赵六}", encoding="utf-8")
+    output_file = tmp_path / "imported_profile.json"
+    with patch(
+        "applypilot.modules.profile.ingestion.service.ResumeIngestionService.parse_file",
+        new_callable=AsyncMock,
+    ) as mock_parse:
+        mock_parse.return_value = _create_mock_profile()
+        res = runner.invoke(app, ["profile", "import", "-f", str(resume_file), "-o", str(output_file)])
+    assert res.exit_code == 0
+    data = json.loads(output_file.read_text(encoding="utf-8"))
+    assert CandidateProfile.model_validate(data).identity.name == "赵六"
 
 
 def test_profile_import_default_output_path(tmp_path: Path, monkeypatch):

@@ -101,6 +101,17 @@ def test_service_repr_masks_api_key():
     assert "api_key='None'" in r2
 
 
+def test_missing_profile_id_is_derived_from_profile_content():
+    first = ResumeIngestionService._normalize_profile_dict({"identity": {"name": "甲"}})
+    second = ResumeIngestionService._normalize_profile_dict({"identity": {"name": "乙"}})
+    assert first["profile_id"] != second["profile_id"]
+    assert first["profile_id"].startswith("cand_")
+
+    empty_first = ResumeIngestionService._normalize_profile_dict({})
+    empty_second = ResumeIngestionService._normalize_profile_dict({})
+    assert empty_first["profile_id"] != empty_second["profile_id"]
+
+
 @pytest.mark.asyncio
 async def test_parse_text_empty_or_whitespace_raises_error():
     service = ResumeIngestionService(api_key="test_api_key")
@@ -237,7 +248,7 @@ async def test_parse_text_defensive_normalization():
         mock_post.return_value = mock_resp
         profile = await service.parse_text("李四的简历")
 
-        assert profile.profile_id == "cand_profile"
+        assert profile.profile_id.startswith("cand_")
         assert profile.identity.name == "李四"
         assert len(profile.experiences) == 1
         assert profile.experiences[0].id == "exp_1"
@@ -260,7 +271,7 @@ async def test_parse_text_missing_profile_id_defaults(sample_profile_dict):
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
         mock_post.return_value = mock_resp
         profile = await service.parse_text("简历文本")
-        assert profile.profile_id == "cand_profile"
+        assert profile.profile_id.startswith("cand_")
 
 
 @pytest.mark.asyncio
