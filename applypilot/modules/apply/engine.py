@@ -21,6 +21,8 @@ from applypilot.adapters.applications.beisen import BeisenApplicationAdapter
 from applypilot.adapters.applications.generic import GenericApplicationAdapter
 from applypilot.adapters.applications.moka import MokaApplicationAdapter
 from applypilot.adapters.detection import PlatformDetector
+from applypilot.core.privacy import AuditSanitizer, get_local_audit_secret
+from applypilot.domain.base import FieldPolicy, LogStrategy, SensitivityLevel
 from applypilot.domain.job import ApplicationStatus, ApplicationTarget
 from applypilot.domain.profile import CandidateProfile
 from applypilot.domain.variant import DisclosurePolicy, ResumeVariant
@@ -115,6 +117,37 @@ class ApplyEngine:
         if not effective_policy.allow_sensitive and ("id_number" in path or "secret" in path):
             return False
         return True
+
+    @staticmethod
+    async def _live_field(element: Any) -> Optional[dict[str, Any]]:
+        # The optional state API must be explicitly implemented by the backend.
+        if callable(getattr(type(element), "inspect_field", None)):
+            return await element.inspect_field()
+        return None
+
+    async def _refresh_readiness(self, fields: list[dict], elements: list[Any]) -> None:
+        for field, element in zip(fields, elements):
+            try:
+                state = await self._live_field(element)
+                if state is not None:
+                    field["observed_value"] = state["observed_value"]
+                    field["is_valid"] = state["is_valid"]
+                    if state.get("is_active") is False:
+                        field["is_required"] = False
+            except Exception:
+                field["observed_value"] = None
+                field["is_valid"] = False
+
+    async def _pause_application(self, app_id: str, run_id: str, url: str,
+                                 stage: str, snapshot_id: str) -> ApplicationStatus:
+        await self.app_repo.update_status(app_id, ApplicationStatus.PAUSED, current_stage=stage)
+        await self.app_repo.update_run_status(run_id, "paused")
+        await self.chk_repo.save_checkpoint(
+            checkpoint_id=f"chk_{uuid.uuid4().hex[:12]}", application_id=app_id,
+            run_id=run_id, page_url=url, stage_key=stage, snapshot_id=snapshot_id,
+            status="paused",
+        )
+        return ApplicationStatus.PAUSED
 
     async def run_application_target(
         self,
@@ -274,6 +307,7 @@ class ApplyEngine:
                 )
 
                 stage_scanned_fields: list[dict[str, Any]] = []
+                scanned_elements: list[Any] = []
 
                 if hasattr(page, "find_all"):
                     elements = await page.find_all(
@@ -281,120 +315,133 @@ class ApplyEngine:
                     )
                     for element in elements:
                         try:
-                            aria_label = (
-                                await element.get_attribute("aria-label")
-                                if hasattr(element, "get_attribute")
-                                else None
-                            )
-                            title_attr = (
-                                await element.get_attribute("title")
-                                if hasattr(element, "get_attribute")
-                                else None
-                            )
-                            name_attr = (
-                                await element.get_attribute("name")
-                                if hasattr(element, "get_attribute")
-                                else None
-                            )
-                            placeholder = (
-                                await element.get_attribute("placeholder")
-                                if hasattr(element, "get_attribute")
-                                else None
-                            )
-                            id_attr = (
-                                await element.get_attribute("id")
-                                if hasattr(element, "get_attribute")
-                                else None
-                            )
-                            type_attr = (
-                                await element.get_attribute("type")
-                                if hasattr(element, "get_attribute")
-                                else None
-                            )
-
-                            tag_name = None
-                            if hasattr(element, "get_attribute"):
-                                try:
-                                    t_val = await element.get_attribute("tagName")
-                                    if not t_val:
-                                        t_val = await element.get_attribute("tag")
-                                    if isinstance(t_val, str):
-                                        tag_name = t_val
-                                except Exception:
-                                    pass
-                            if tag_name is None and hasattr(element, "evaluate"):
-                                try:
-                                    t_val = await element.evaluate("el => el.tagName")
-                                    if isinstance(t_val, str):
-                                        tag_name = t_val
-                                except Exception:
-                                    pass
-                            if tag_name is None and hasattr(element, "tag_name"):
-                                try:
-                                    if isinstance(element.tag_name, str):
-                                        tag_name = element.tag_name
-                                    elif inspect.iscoroutinefunction(element.tag_name):
-                                        t_val = await element.tag_name()
-                                        if isinstance(t_val, str):
-                                            tag_name = t_val
-                                    elif callable(element.tag_name):
-                                        t_val = element.tag_name()
-                                        if inspect.iscoroutine(t_val) or inspect.isawaitable(t_val):
-                                            t_val = await t_val
-                                        if isinstance(t_val, str):
-                                            tag_name = t_val
-                                except Exception:
-                                    pass
-
-                            label = aria_label or title_attr or name_attr or placeholder or id_attr or ""
-                            tag_str = str(tag_name).strip().lower() if tag_name else ""
-                            type_str = str(type_attr).strip().lower() if type_attr else ""
-
-                            if tag_str == "select" or type_str in ("select", "select-one", "select-multiple"):
-                                field_type = "select"
-                            elif type_str == "file":
-                                field_type = "file"
-                            elif type_str in ("radio", "checkbox"):
-                                field_type = type_str
+                            live_state = await self._live_field(element)
+                            if live_state is not None:
+                                if live_state.get("is_active") is False:
+                                    continue
+                                label = live_state["label"]
+                                field_sig = live_state["field_sig"]
+                                tag_str = live_state["tag"]
+                                type_str = live_state["type"]
+                                field_type = ("select" if tag_str == "select" else
+                                              "text" if tag_str == "textarea" else type_str or "text")
+                                element_attrs = live_state["element_attrs"]
+                                outer_html = live_state["outer_html"]
                             else:
-                                field_type = type_str or "text"
+                                aria_label = (
+                                    await element.get_attribute("aria-label")
+                                    if hasattr(element, "get_attribute")
+                                    else None
+                                )
+                                title_attr = (
+                                    await element.get_attribute("title")
+                                    if hasattr(element, "get_attribute")
+                                    else None
+                                )
+                                name_attr = (
+                                    await element.get_attribute("name")
+                                    if hasattr(element, "get_attribute")
+                                    else None
+                                )
+                                placeholder = (
+                                    await element.get_attribute("placeholder")
+                                    if hasattr(element, "get_attribute")
+                                    else None
+                                )
+                                id_attr = (
+                                    await element.get_attribute("id")
+                                    if hasattr(element, "get_attribute")
+                                    else None
+                                )
+                                type_attr = (
+                                    await element.get_attribute("type")
+                                    if hasattr(element, "get_attribute")
+                                    else None
+                                )
 
-                            field_sig = id_attr or name_attr or aria_label or label
-
-                            # Collect element attributes for requirement detection
-                            element_attrs: dict[str, Any] = {}
-                            if hasattr(element, "get_attribute"):
-                                for attr_name in (
-                                    "required",
-                                    "aria-required",
-                                    "type",
-                                    "name",
-                                    "id",
-                                    "placeholder",
-                                    "class",
-                                ):
+                                tag_name = None
+                                if hasattr(element, "get_attribute"):
                                     try:
-                                        attr_val = await element.get_attribute(attr_name)
-                                        if attr_val is not None:
-                                            element_attrs[attr_name] = attr_val
+                                        t_val = await element.get_attribute("tagName")
+                                        if not t_val:
+                                            t_val = await element.get_attribute("tag")
+                                        if isinstance(t_val, str):
+                                            tag_name = t_val
+                                    except Exception:
+                                        pass
+                                if tag_name is None and hasattr(element, "evaluate"):
+                                    try:
+                                        t_val = await element.evaluate("el => el.tagName")
+                                        if isinstance(t_val, str):
+                                            tag_name = t_val
+                                    except Exception:
+                                        pass
+                                if tag_name is None and hasattr(element, "tag_name"):
+                                    try:
+                                        if isinstance(element.tag_name, str):
+                                            tag_name = element.tag_name
+                                        elif inspect.iscoroutinefunction(element.tag_name):
+                                            t_val = await element.tag_name()
+                                            if isinstance(t_val, str):
+                                                tag_name = t_val
+                                        elif callable(element.tag_name):
+                                            t_val = element.tag_name()
+                                            if inspect.iscoroutine(t_val) or inspect.isawaitable(t_val):
+                                                t_val = await t_val
+                                            if isinstance(t_val, str):
+                                                tag_name = t_val
                                     except Exception:
                                         pass
 
-                            outer_html = None
-                            if hasattr(element, "get_attribute"):
-                                try:
-                                    o_val = await element.get_attribute("outerHTML")
-                                    if isinstance(o_val, str):
-                                        outer_html = o_val
-                                except Exception:
-                                    pass
-                            if outer_html is None and hasattr(element, "evaluate"):
-                                try:
-                                    o_val = await element.evaluate("el => el.outerHTML")
-                                    if isinstance(o_val, str):
-                                        outer_html = o_val
-                                except Exception:
-                                    pass
+                                label = aria_label or title_attr or name_attr or placeholder or id_attr or ""
+                                tag_str = str(tag_name).strip().lower() if tag_name else ""
+                                type_str = str(type_attr).strip().lower() if type_attr else ""
+
+                                if tag_str == "select" or type_str in ("select", "select-one", "select-multiple"):
+                                    field_type = "select"
+                                elif type_str == "file":
+                                    field_type = "file"
+                                elif type_str in ("radio", "checkbox"):
+                                    field_type = type_str
+                                else:
+                                    field_type = type_str or "text"
+
+                                field_sig = id_attr or name_attr or aria_label or label
+
+                                # Collect element attributes for requirement detection
+                                element_attrs: dict[str, Any] = {}
+                                if hasattr(element, "get_attribute"):
+                                    for attr_name in (
+                                        "required",
+                                        "aria-required",
+                                        "type",
+                                        "name",
+                                        "id",
+                                        "placeholder",
+                                        "class",
+                                    ):
+                                        try:
+                                            attr_val = await element.get_attribute(attr_name)
+                                            if attr_val is not None:
+                                                element_attrs[attr_name] = attr_val
+                                        except Exception:
+                                            pass
+
+                                outer_html = None
+                                if hasattr(element, "get_attribute"):
+                                    try:
+                                        o_val = await element.get_attribute("outerHTML")
+                                        if isinstance(o_val, str):
+                                            outer_html = o_val
+                                    except Exception:
+                                        pass
+                                if outer_html is None and hasattr(element, "evaluate"):
+                                    try:
+                                        o_val = await element.evaluate("el => el.outerHTML")
+                                        if isinstance(o_val, str):
+                                            outer_html = o_val
+                                    except Exception:
+                                        pass
 
                             is_required = FormRequirementDetector.is_field_required(
                                 element_attrs=element_attrs,
@@ -427,11 +474,12 @@ class ApplyEngine:
                                 disclosure_allowed=disclosure_allowed,
                             )
 
-                            observed = None
-                            if hasattr(element, "get_text"):
-                                observed = await element.get_text()
-                            if not observed and hasattr(element, "get_attribute"):
-                                observed = await element.get_attribute("value")
+                            observed = live_state["observed_value"] if live_state is not None else None
+                            if live_state is None:
+                                if hasattr(element, "get_text"):
+                                    observed = await element.get_text()
+                                if not observed and hasattr(element, "get_attribute"):
+                                    observed = await element.get_attribute("value")
 
                             if path and disclosure_allowed:
                                 expected = self.resolver.resolve(profile, variant, path)
@@ -454,11 +502,17 @@ class ApplyEngine:
                                         )
                                         action_type = str(getattr(res, "action_type", "type_text"))
                                         status_str = "success" if getattr(res, "success", True) else "failed"
-                                        obs_val = (
-                                            str(res.observed_value)[:64]
-                                            if getattr(res, "observed_value", None) is not None
-                                            else None
+                                        after_fill = await self._live_field(element)
+                                        obs_raw = (after_fill["observed_value"] if after_fill is not None
+                                                   else getattr(res, "observed_value", None))
+                                        sensitive = any(key in path for key in ("id_number", "political", "family", "secret"))
+                                        field_policy = FieldPolicy(
+                                            path_pattern=path,
+                                            sensitivity=SensitivityLevel.SENSITIVE if sensitive else SensitivityLevel.PERSONAL,
+                                            llm_allowed=False, log_strategy=LogStrategy.MASK,
                                         )
+                                        obs_val = AuditSanitizer.mask_value(field_policy, obs_raw)
+                                        secret = get_local_audit_secret()
                                         err_code = (
                                             str(res.error_code)
                                             if getattr(res, "error_code", None) is not None
@@ -474,13 +528,18 @@ class ApplyEngine:
                                             status=status_str,
                                             duration_ms=50,
                                             value_preview=obs_val,
+                                            expected_hash=AuditSanitizer.compute_fingerprint(secret, raw_value=expected),
+                                            observed_hash=AuditSanitizer.compute_fingerprint(secret, raw_value=obs_raw),
                                             error_code=err_code,
                                         )
-                                        if getattr(res, "observed_value", None) is not None:
+                                        if after_fill is not None:
+                                            observed = after_fill["observed_value"]
+                                        elif getattr(res, "observed_value", None) is not None:
                                             observed = res.observed_value
                                         elif getattr(res, "success", True):
                                             observed = expected
 
+                            scanned_elements.append(element)
                             stage_scanned_fields.append({
                                 "field_sig": field_sig,
                                 "label": label,
@@ -499,6 +558,9 @@ class ApplyEngine:
                             )
                             continue
 
+                # Re-read all controls after filling, including radio groups.
+                await self._refresh_readiness(stage_scanned_fields, scanned_elements)
+
                 # Stage readiness diagnostics and interactive resolution
                 report = ReadinessAuditor.audit_fields(
                     stage_scanned_fields, profile, variant
@@ -511,7 +573,7 @@ class ApplyEngine:
                         payload_json={
                             "stage": current_stage,
                             "missing_required": [
-                                item.model_dump(mode="json")
+                                item.model_dump(mode="json", exclude={"observed_value"})
                                 for item in report.missing_required
                             ],
                         },
@@ -524,24 +586,9 @@ class ApplyEngine:
                             if inspect.iscoroutine(res) or inspect.isawaitable(res):
                                 res = await res
                             if res == ApplicationStatus.PAUSED or res is False:
-                                await self.app_repo.update_status(
-                                    app_id,
-                                    ApplicationStatus.PAUSED,
-                                    current_stage=current_stage,
+                                return await self._pause_application(
+                                    app_id, run_id, target_url, current_stage, snap_id
                                 )
-                                await self.app_repo.update_run_status(run_id, "paused")
-                                chk_id = f"chk_{uuid.uuid4().hex[:12]}"
-                                await self.chk_repo.save_checkpoint(
-                                    checkpoint_id=chk_id,
-                                    application_id=app_id,
-                                    run_id=run_id,
-                                    page_url=target_url,
-                                    stage_key=current_stage,
-                                    snapshot_id=snap_id,
-                                    completed_fields_json=[],
-                                    status="paused",
-                                )
-                                return ApplicationStatus.PAUSED
                         else:
                             missing_labels = ", ".join(
                                 item.label or item.field_sig
@@ -551,22 +598,17 @@ class ApplyEngine:
                                 f"阶段【{current_stage}】存在 {len(report.missing_required)} 个必填缺失项：{missing_labels}，请在浏览器中核对补填"
                             )
                     else:
-                        await self.app_repo.update_status(
-                            app_id, ApplicationStatus.PAUSED, current_stage=current_stage
+                        return await self._pause_application(
+                            app_id, run_id, target_url, current_stage, snap_id
                         )
-                        await self.app_repo.update_run_status(run_id, "paused")
-                        chk_id = f"chk_{uuid.uuid4().hex[:12]}"
-                        await self.chk_repo.save_checkpoint(
-                            checkpoint_id=chk_id,
-                            application_id=app_id,
-                            run_id=run_id,
-                            page_url=target_url,
-                            stage_key=current_stage,
-                            snapshot_id=snap_id,
-                            completed_fields_json=[],
-                            status="paused",
+
+                if not report.is_ready:
+                    await self._refresh_readiness(stage_scanned_fields, scanned_elements)
+                    report = ReadinessAuditor.audit_fields(stage_scanned_fields, profile, variant)
+                    if not report.is_ready:
+                        return await self._pause_application(
+                            app_id, run_id, target_url, current_stage, snap_id
                         )
-                        return ApplicationStatus.PAUSED
 
                 chk_id = f"chk_{uuid.uuid4().hex[:12]}"
                 await self.chk_repo.save_checkpoint(
@@ -593,8 +635,9 @@ class ApplyEngine:
                 if hasattr(adapter, "advance"):
                     advanced = await adapter.advance(page, current_stage)
                 if not advanced:
-                    completed_normally = True
-                    break
+                    return await self._pause_application(
+                        app_id, run_id, target_url, current_stage, snap_id
+                    )
 
             if not completed_normally:
                 await self.app_repo.update_run_status(

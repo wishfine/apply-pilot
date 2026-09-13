@@ -7,7 +7,7 @@
 *One profile. Every application. —— 一份资料，投遍所有岗位。*
 
 [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-286%20Passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-305%20Passed-brightgreen.svg)](tests/)
 [![Architecture](https://img.shields.io/badge/Design-Local--first-orange.svg)](docs/superpowers/specs/2026-09-12-apply-pilot-v0.1-design.md)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -232,16 +232,21 @@ ApplyPilot 遵循 **Local-First（本地优先）** 准则，数据存储在用�
 本项目采用严格的测试驱动开发（TDD）规范，包含完整的单元测试与端到端 Smoke 测试：
 
 ```bash
-# 运行完整测试套件 (286 项测试全部通过)
+# 运行完整测试套件 (305 项测试全部通过（含本地浏览器回归测试）)
 uv run pytest
 
 # 运行特定模块测试
 uv run pytest tests/unit/adapters/ -v
 uv run pytest tests/unit/modules/test_engine_readiness.py -v
 uv run pytest tests/e2e/test_cli_apply_run.py -v
+
+# 强制运行真实浏览器回归测试（缺少浏览器时直接失败）
+APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run pytest tests/integration/ -q
 ```
 
 ---
+
+浏览器回归测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过；设置 `APPLYPILOT_REQUIRE_BROWSER_TESTS=1` 可确保这些测试实际执行。
 
 ## 📄 开源协议与声明
 

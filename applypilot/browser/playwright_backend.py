@@ -78,6 +78,50 @@ class PlaywrightElement:
         except Exception as e:
             raise BrowserDriverError(f"get_text failed: {e}") from e
 
+    async def is_checked(self) -> bool:
+        try:
+            return await self._locator.is_checked(timeout=self._policy.action_timeout_ms)
+        except Exception as e:
+            raise BrowserDriverError(f"is_checked failed: {e}") from e
+
+    async def inspect_field(self) -> dict[str, Any]:
+        """Read live form state, associated labels and requirement containers together."""
+        try:
+            return await self._locator.evaluate("""el => {
+                const attrs = Object.fromEntries(Array.from(el.attributes, a => [a.name, a.value]));
+                const container = el.closest('.ant-form-item, .el-form-item, .form-item, .form-group');
+                const visible = node => !!node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden';
+                const active = !el.matches(':disabled') && (visible(el) || (el.type === 'file'
+                    && (Array.from(el.labels || []).some(visible) || (container && visible(container)))));
+                const labelText = Array.from(el.labels || [], l => l.textContent.trim()).join(' ');
+                const labelledBy = (el.getAttribute('aria-labelledby') || '').split(/\\s+/)
+                    .map(id => document.getElementById(id)?.textContent?.trim() || '').join(' ').trim();
+                let label = el.getAttribute('aria-label') || labelledBy || labelText
+                    || container?.querySelector('label')?.textContent?.trim()
+                    || el.title || el.getAttribute('placeholder') || el.name || el.id || '';
+                let observed = el.value ?? '';
+                let required = el.required || el.getAttribute('aria-required') === 'true';
+                if (el.type === 'radio') {
+                    const group = el.name ? Array.from(el.getRootNode().querySelectorAll('input[type=radio]'))
+                        .filter(x => x.name === el.name && x.form === el.form) : [el];
+                    observed = group.find(x => x.checked)?.value ?? null;
+                    required = required || group.some(x => x.required);
+                    label = el.closest('fieldset')?.querySelector('legend')?.textContent?.trim()
+                        || el.getAttribute('aria-label') || labelledBy || el.name || label;
+                } else if (el.type === 'checkbox') {
+                    observed = el.checked ? (el.value || true) : null;
+                } else if (el.type === 'file') {
+                    observed = el.files.length ? Array.from(el.files, f => f.name).join(', ') : null;
+                }
+                if (required) attrs.required = '';
+                return {tag: el.tagName.toLowerCase(), type: el.type || '', label,
+                    field_sig: el.id || el.name || label, element_attrs: attrs,
+                    outer_html: (container || el).outerHTML, observed_value: observed,
+                    is_active: !!active, is_valid: el.validity ? el.validity.valid : true};
+            }""", timeout=self._policy.action_timeout_ms)
+        except Exception as e:
+            raise BrowserDriverError(f"inspect_field failed: {e}") from e
+
     async def click(self) -> None:
         try:
             await self._throttle()

@@ -50,12 +50,14 @@ def test_readiness_auditor_all_required_filled(sample_profile: CandidateProfile)
             "label": "姓名",
             "is_required": True,
             "mapped_path": "identity.name",
+            "observed_value": "张三",
         },
         {
             "field_sig": "sig_mobile",
             "label": "手机号",
             "is_required": True,
             "mapped_path": "contact.mobile",
+            "observed_value": "13800138000",
         },
     ]
 
@@ -75,6 +77,7 @@ def test_readiness_auditor_missing_required_field(sample_profile: CandidateProfi
             "label": "姓名",
             "is_required": True,
             "mapped_path": "identity.name",
+            "observed_value": "张三",
         },
         {
             "field_sig": "sig_political",

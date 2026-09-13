@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+import json
 from pathlib import Path
 import re
 from typing import Any, Optional
@@ -12,7 +13,6 @@ import yaml
 from applypilot.domain.base import TriState
 from applypilot.domain.profile import CandidateProfile
 from applypilot.domain.variant import ResumeVariant
-from applypilot.modules.profile.resolver import ValueResolver
 
 
 def _is_meaningful_value(val: Any) -> bool:
@@ -182,13 +182,8 @@ class ReadinessAuditor:
 
             is_filled = False
             # 1. Check if observed DOM value is meaningful (e.g. 0, False, non-empty string)
-            if _is_meaningful_value(observed_value):
+            if _is_meaningful_value(observed_value) and field.get("is_valid") is not False:
                 is_filled = True
-            # 2. Check if profile / variant path resolves to a meaningful value
-            elif mapped_path:
-                resolved = ValueResolver.resolve(profile, variant, mapped_path)
-                if _is_meaningful_value(resolved):
-                    is_filled = True
 
             # Determine status
             if is_filled:
@@ -286,8 +281,11 @@ class ProfileWritebackSynchronizer:
         # Validate with CandidateProfile schema
         CandidateProfile.model_validate(data)
 
-        yaml_str = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+        serialized = (
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+            if path.suffix.lower() == ".json"
+            else yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+        )
         tmp_path = path.with_suffix(f"{path.suffix}.tmp")
-        tmp_path.write_text(yaml_str, encoding="utf-8")
+        tmp_path.write_text(serialized, encoding="utf-8")
         tmp_path.replace(path)
-

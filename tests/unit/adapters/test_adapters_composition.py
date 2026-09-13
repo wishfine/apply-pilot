@@ -229,7 +229,7 @@ async def test_beisen_application_adapter():
     # Lifecycle methods
     stage = await adapter.detect_stage(mock_page)
     assert stage == "beisen_stage"
-    assert await adapter.advance(mock_page, stage) is True
+    assert await adapter.advance(mock_page, stage) is False
     assert await adapter.is_final_review(mock_page) is False
 
 

@@ -24,6 +24,12 @@ class DummyElement:
     async def get_text(self):
         return "Hello"
 
+    async def inspect_field(self):
+        return {"observed_value": "Hello", "is_valid": True}
+
+    async def is_checked(self):
+        return False
+
     async def click(self):
         pass
 
@@ -462,5 +468,4 @@ async def test_playwright_backend_close_robustness(tmp_path: Path):
     mock_playwright.stop.assert_awaited_once()
     assert backend._context is None
     assert backend._playwright is None
-
 

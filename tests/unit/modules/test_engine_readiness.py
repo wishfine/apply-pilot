@@ -77,10 +77,10 @@ async def test_readiness_audit_halts_and_prompts_user_when_required_missing(tmp_
     target = _create_sample_target(provider="generic")
 
     status = await engine.run_application_target(target, profile)
-    assert status == ApplicationStatus.READY_REVIEW
+    assert status == ApplicationStatus.PAUSED
 
-    # Should have called wait_for_user twice: first for readiness halt, second for ready review
-    assert mock_browser.wait_for_user.await_count == 2
+    # A prompt alone does not resolve the missing field; no final-review prompt.
+    assert mock_browser.wait_for_user.await_count == 1
     prompt_call = mock_browser.wait_for_user.await_args_list[0][0][0]
     assert "阶段【single_page】存在 1 个必填缺失项：手机号" in prompt_call
     assert "请在浏览器中核对补填" in prompt_call
@@ -208,7 +208,7 @@ async def test_custom_readiness_resolver_invoked(tmp_path: Path):
     target = _create_sample_target(provider="generic")
 
     status = await engine.run_application_target(target, profile)
-    assert status == ApplicationStatus.READY_REVIEW
+    assert status == ApplicationStatus.PAUSED
 
     # Custom resolver called once with (page, report, profile, variant)
     assert custom_resolver.await_count == 1
@@ -219,9 +219,8 @@ async def test_custom_readiness_resolver_invoked(tmp_path: Path):
     assert len(report.missing_required) == 1
     assert call_args[2] == profile
 
-    # Default readiness prompt should NOT have been called, only the final handoff
-    assert mock_browser.wait_for_user.await_count == 1
-    assert "表单字段已填写完毕" in mock_browser.wait_for_user.await_args[0][0]
+    # The resolver did not fill the page, so neither default nor final prompts run.
+    mock_browser.wait_for_user.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -381,7 +380,7 @@ async def test_sync_readiness_resolver_invoked(tmp_path: Path):
     target = _create_sample_target(provider="generic")
 
     status = await engine.run_application_target(target, profile)
-    assert status == ApplicationStatus.READY_REVIEW
+    assert status == ApplicationStatus.PAUSED
     assert len(sync_called) == 1
 
 
