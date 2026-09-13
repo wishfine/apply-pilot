@@ -7,7 +7,7 @@
 *One profile. Every application.*
 
 [![Python](https://img.shields.io/badge/Python-%3E%3D3.11-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/Tests-390%20Passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-392%20Passed-brightgreen.svg)](tests/)
 [![Architecture](https://img.shields.io/badge/Design-Local--first-orange.svg)](docs/superpowers/specs/2026-09-12-apply-pilot-v0.1-design.md)
 
 </div>
@@ -45,7 +45,7 @@ uv sync
 uv run playwright install chromium
 ```
 
-项目声明 Python >= 3.11；最近一次完整测试在 Python 3.11 和 3.14 上均为 390 项通过。
+项目声明 Python >= 3.11；最近一次完整测试在 Python 3.11 和 3.14 上均为 392 项通过。
 
 ### 2. 统一资料目录
 
@@ -101,15 +101,16 @@ uv run applypilot profile show
 uv run applypilot apply run -u "https://目标招聘网站/实际表单地址"
 ```
 
-尽量使用已登录、已打开填写步骤的表单地址。浏览器使用独立的持久化目录，不会自动复用你日常 Chrome 的登录状态；登录、验证码、岗位详情页到表单的跳转尚未形成完整流程。
+尽量使用已登录、已打开填写步骤的表单地址。浏览器使用独立的持久化目录，不会自动复用你日常 Chrome 的登录状态；遇到登录、短信验证或暂时未加载出控件的页面时，交互模式会保持浏览器打开并提示你完成操作，回到终端按回车后重新扫描。
 
 运行时：
 
 1. 打开 Chromium，检测平台并扫描控件。
-2. 按规则匹配本地档案，应用披露策略后尝试填写。
-3. 回读页面，检查必填项。出现缺失时可选择浏览器补填、终端补填或暂停。
-4. 人工补填后再次检查；仍未满足要求则进入 `PAUSED`。
-5. 到达 `READY_REVIEW` 后，在浏览器中核对并亲自提交，完成后再回终端按回车。回车结束流程后浏览器会关闭。
+2. 登录、验证或页面控件尚未出现时，按终端提示在浏览器中完成操作，再按回车重新扫描。
+3. 按规则匹配本地档案，应用披露策略后尝试填写。
+4. 回读页面，检查必填项。出现缺失时可选择浏览器补填、终端补填或暂停。
+5. 人工补填后再次检查；仍未满足要求则进入 `PAUSED`。
+6. 到达 `READY_REVIEW` 后，在浏览器中核对并亲自提交，完成后再回终端按回车。回车结束流程后浏览器会关闭。
 
 终端补填目前仅适合普通文本控件；数组路径（如某段教育经历）不支持自动回写，下拉框和文件上传等请在浏览器处理。JSON 档案回写会保留 JSON 格式。
 
@@ -174,7 +175,7 @@ APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run pytest tests/integration/ -q
 APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run --isolated --python 3.13 --locked pytest -q
 ```
 
-当前共有 390 项测试，其中包含真实浏览器表单回归、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
+当前共有 392 项测试，其中包含真实浏览器表单回归、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
 
 测试通过说明已覆盖的行为符合断言，不代表真实招聘站点全功能兼容。后续重点包括上下文映射、附件类型约束、登录与页面识别、可恢复申请状态机，以及真实平台组件适配。
 

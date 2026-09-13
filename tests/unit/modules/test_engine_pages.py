@@ -156,3 +156,102 @@ async def test_failure_event_does_not_store_exception_details(tmp_path: Path):
     failed = [event for event in events if event["event_type"] == "RUN_FAILED"]
     assert failed
     assert "110101200001011234" not in failed[0]["payload_json"]
+
+
+@pytest.mark.asyncio
+async def test_interactive_login_keeps_browser_open_and_retries_same_session(tmp_path: Path):
+    from applypilot.adapters.applications.base import FillResult
+
+    db_file = tmp_path / "interactive_login.db"
+    await init_db(db_file)
+    browser = AsyncMock()
+    page = AsyncMock()
+    page.url = AsyncMock(return_value="https://example.com/apply")
+    browser.open_page.return_value = page
+
+    element = AsyncMock()
+    element.get_attribute = AsyncMock(side_effect=lambda attr: {
+        "id": "name", "name": "姓名", "type": "text",
+    }.get(attr))
+    element.get_text = AsyncMock(return_value="")
+    page.find_all = AsyncMock(return_value=[element])
+
+    adapter = AsyncMock()
+    adapter.detect_stage.return_value = "application"
+    adapter.is_login_page.return_value = True
+    adapter.fill_field.return_value = FillResult(
+        success=True, action_type="type_text", observed_value="测试员"
+    )
+    adapter.is_final_review.return_value = True
+
+    prompts = []
+    async def finish_login(reason):
+        prompts.append(reason)
+        adapter.is_login_page.return_value = False
+    browser.wait_for_user = AsyncMock(side_effect=finish_login)
+
+    profile = CandidateProfile(profile_id="cand_interactive_login", identity=IdentityInfo(name="测试员"))
+    job = Job(job_id="job_interactive_login", title="岗位", company_name="公司", description_raw="desc",
+              source_channel="url", source_url="https://example.com/apply",
+              apply_url="https://example.com/apply")
+    engine = ApplyEngine(db_file, browser, adapters={"custom": adapter})
+    status = await engine.run_application_target(
+        ApplicationTarget(target_id="target_interactive_login", job=job, provider="custom"),
+        profile,
+    )
+
+    assert status == ApplicationStatus.READY_REVIEW
+    assert any("登录" in prompt for prompt in prompts)
+    adapter.fill_field.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_interactive_unrecognized_page_can_be_retried_after_manual_action(tmp_path: Path):
+    from applypilot.adapters.applications.base import FillResult
+
+    db_file = tmp_path / "interactive_unrecognized.db"
+    await init_db(db_file)
+    browser = AsyncMock()
+    page = AsyncMock()
+    page.url = AsyncMock(return_value="https://example.com/apply")
+    browser.open_page.return_value = page
+
+    element = AsyncMock()
+    element.get_attribute = AsyncMock(side_effect=lambda attr: {
+        "id": "name", "name": "姓名", "type": "text",
+    }.get(attr))
+    element.get_text = AsyncMock(return_value="")
+    page_ready = False
+    async def find_elements(*_args):
+        return [element] if page_ready else []
+    page.find_all = AsyncMock(side_effect=find_elements)
+
+    adapter = AsyncMock()
+    adapter.detect_stage.return_value = "application"
+    adapter.is_login_page.return_value = False
+    adapter.fill_field.return_value = FillResult(
+        success=True, action_type="type_text", observed_value="测试员"
+    )
+    adapter.is_final_review.side_effect = lambda *_args: page_ready
+    adapter.advance.return_value = False
+
+    prompts = []
+    async def make_page_ready(reason):
+        nonlocal page_ready
+        prompts.append(reason)
+        page_ready = True
+    browser.wait_for_user = AsyncMock(side_effect=make_page_ready)
+
+    profile = CandidateProfile(profile_id="cand_manual_retry", identity=IdentityInfo(name="测试员"))
+    job = Job(job_id="job_manual_retry", title="岗位", company_name="公司", description_raw="desc",
+              source_channel="url", source_url="https://example.com/apply",
+              apply_url="https://example.com/apply")
+    engine = ApplyEngine(db_file, browser, adapters={"custom": adapter}, form_hydration_timeout_ms=0)
+    status = await engine.run_application_target(
+        ApplicationTarget(target_id="target_manual_retry", job=job, provider="custom"),
+        profile,
+    )
+
+    assert status == ApplicationStatus.READY_REVIEW
+    assert any("未识别" in prompt or "登录" in prompt for prompt in prompts)
+    adapter.fill_field.assert_awaited()

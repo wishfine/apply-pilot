@@ -549,6 +549,8 @@ class ApplyEngine:
             # -----------------------------------------------------------------
             completed_normally = False
             structure_rescan_attempts: dict[str, int] = {}
+            login_retry_attempts = 0
+            unrecognized_retry_attempts = 0
             for step in range(10):
                 current_stage = (
                     await adapter.detect_stage(page)
@@ -575,13 +577,23 @@ class ApplyEngine:
                 )
 
                 if await self._is_login_page(adapter, page):
-                    logger.warning("检测到当前页面为登录页面，暂停等待用户在浏览器中完成登录")
+                    logger.warning("检测到当前页面为登录页面，等待用户在浏览器中完成登录")
                     await self.event_repo.append_event(
                         event_id=f"evt_{uuid.uuid4().hex[:12]}",
                         run_id=run_id,
                         event_type="LOGIN_REQUIRED",
                         payload_json={"stage": current_stage, "page_url": target_url},
                     )
+                    if (
+                        self.interactive_readiness
+                        and hasattr(self.browser, "wait_for_user")
+                        and login_retry_attempts < 3
+                    ):
+                        login_retry_attempts += 1
+                        await self.browser.wait_for_user(
+                            "检测到登录或验证页面。请在浏览器中完成登录、短信验证或授权，页面进入网申表单后回到终端按回车继续"
+                        )
+                        continue
                     return await self._pause_application(
                         app_id, run_id, target_url, "login_required", snap_id
                     )
@@ -929,13 +941,23 @@ class ApplyEngine:
 
                 if len(stage_scanned_fields) == 0:
                     if await self._is_login_page(adapter, page):
-                        logger.warning("检测到当前页面为登录页面，暂停等待用户在浏览器中完成登录")
+                        logger.warning("检测到当前页面为登录页面，等待用户在浏览器中完成登录")
                         await self.event_repo.append_event(
                             event_id=f"evt_{uuid.uuid4().hex[:12]}",
                             run_id=run_id,
                             event_type="LOGIN_REQUIRED",
                             payload_json={"stage": current_stage, "page_url": target_url},
                         )
+                        if (
+                            self.interactive_readiness
+                            and hasattr(self.browser, "wait_for_user")
+                            and login_retry_attempts < 3
+                        ):
+                            login_retry_attempts += 1
+                            await self.browser.wait_for_user(
+                                "检测到登录或验证页面。请在浏览器中完成登录、短信验证或授权，页面进入网申表单后回到终端按回车继续"
+                            )
+                            continue
                         return await self._pause_application(
                             app_id, run_id, target_url, "login_required", snap_id
                         )
@@ -956,6 +978,23 @@ class ApplyEngine:
                     if advanced:
                         continue
 
+                    if (
+                        self.interactive_readiness
+                        and hasattr(self.browser, "wait_for_user")
+                        and unrecognized_retry_attempts < 2
+                    ):
+                        unrecognized_retry_attempts += 1
+                        await self.event_repo.append_event(
+                            event_id=f"evt_{uuid.uuid4().hex[:12]}",
+                            run_id=run_id,
+                            event_type="PAGE_RETRY_REQUESTED",
+                            payload_json={"stage": current_stage, "page_url": target_url},
+                        )
+                        await self.browser.wait_for_user(
+                            "当前页面暂未识别到可填写控件。若页面正在登录、验证或加载，请在浏览器中完成操作，看到网申字段后回到终端按回车重新扫描"
+                        )
+                        continue
+
                     logger.warning("阶段 '%s' 未检测到有效表单控件或终审状态，暂停等待人工核查", current_stage)
                     await self.event_repo.append_event(
                         event_id=f"evt_{uuid.uuid4().hex[:12]}",
@@ -966,6 +1005,9 @@ class ApplyEngine:
                     return await self._pause_application(
                         app_id, run_id, target_url, current_stage, snap_id
                     )
+
+                login_retry_attempts = 0
+                unrecognized_retry_attempts = 0
 
                 # Stage readiness diagnostics and interactive resolution
                 self._mark_unmatched_option_groups(stage_scanned_fields)
