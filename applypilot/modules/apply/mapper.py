@@ -216,6 +216,80 @@ class FieldMapper:
                     confidence=conf,
                 )
 
+        clean_sec = _clean_label(section_title) if section_title else ""
+
+        # -----------------------------------------------------------------
+        # Entity & Section Context Disambiguation
+        # -----------------------------------------------------------------
+        # 1. Family member context (father, mother, spouse, child)
+        fam_entity = None
+        if "父亲" in clean_key or ("父" in clean_key and any(k in clean_key for k in ("姓名", "电话", "手机", "工作", "单位", "职务"))):
+            fam_entity = "father"
+        elif "母亲" in clean_key or ("母" in clean_key and any(k in clean_key for k in ("姓名", "电话", "手机", "工作", "单位", "职务"))):
+            fam_entity = "mother"
+        elif "配偶" in clean_key:
+            fam_entity = "spouse"
+        elif any(k in clean_key for k in ("子女", "儿子", "女儿")):
+            fam_entity = "child"
+
+        if fam_entity:
+            if "姓名" in clean_key or "名字" in clean_key:
+                return FieldMappingResult(f"soe_extended.family_members[{fam_entity}].name", "exact_rule", 1.0)
+            if any(k in clean_key for k in ("手机", "电话", "联系方式")):
+                return FieldMappingResult(f"soe_extended.family_members[{fam_entity}].phone", "exact_rule", 1.0)
+            if any(k in clean_key for k in ("单位", "工作单位", "公司")):
+                return FieldMappingResult(f"soe_extended.family_members[{fam_entity}].workplace", "exact_rule", 1.0)
+            if any(k in clean_key for k in ("职务", "职位", "岗位")):
+                return FieldMappingResult(f"soe_extended.family_members[{fam_entity}].title", "exact_rule", 1.0)
+            if "政治面貌" in clean_key:
+                return FieldMappingResult(f"soe_extended.family_members[{fam_entity}].political_status", "exact_rule", 1.0)
+
+        # Family section without specific entity in label: ambiguous, do NOT map to candidate
+        if any(k in clean_sec for k in ("家庭", "亲属", "家属", "父母", "配偶")):
+            if "关系" in clean_key or "称谓" in clean_key:
+                return FieldMappingResult(None, "unmapped", 0.0)
+            if any(k in clean_key for k in ("姓名", "手机", "电话", "单位", "职务", "工作")):
+                return FieldMappingResult(None, "unmapped", 0.0)
+
+        # 2. Emergency contact context
+        is_emergency = "紧急" in clean_key or any(k in clean_sec for k in ("紧急联系人", "紧急联系"))
+        if is_emergency:
+            if any(k in clean_key for k in ("手机", "电话")):
+                return FieldMappingResult("contact.emergency_contact_phone", "exact_rule", 1.0)
+            if ("联系人" in clean_key or "姓名" in clean_key) and "关系" not in clean_key:
+                return FieldMappingResult("contact.emergency_contact_name", "exact_rule", 1.0)
+            if "关系" in clean_key:
+                return FieldMappingResult(None, "unmapped", 0.0)
+
+        # 3. Education stage context
+        edu_level = None
+        if "本科" in clean_key or "学士" in clean_key or "本科" in clean_sec or "学士" in clean_sec:
+            edu_level = "bachelor"
+        elif "硕士" in clean_key or "研究生" in clean_key or "硕士" in clean_sec or ("研究生" in clean_sec and "生院" not in clean_sec):
+            edu_level = "master"
+        elif "博士" in clean_key or "博士" in clean_sec:
+            edu_level = "doctor"
+        elif "大专" in clean_key or "专科" in clean_key or "大专" in clean_sec or "专科" in clean_sec:
+            edu_level = "associate"
+        elif "高中" in clean_key or "高中" in clean_sec:
+            edu_level = "high_school"
+
+        if edu_level:
+            if ("院校" in clean_key or "学校" in clean_key) and not any(k in clean_key for k in ("性质", "类型", "类别", "排名")):
+                return FieldMappingResult(f"education[{edu_level}].school_name", "exact_rule" if any(clean_key == f"{k}毕业院校" for k in ("本科", "硕士", "博士")) else "semantic", 0.95)
+            if "专业" in clean_key and not any(k in clean_key for k in ("排名", "性质", "类别")):
+                return FieldMappingResult(f"education[{edu_level}].major", "exact_rule" if any(clean_key == f"{k}专业" for k in ("本科", "硕士", "博士")) else "semantic", 0.95)
+            if "学历" in clean_key:
+                return FieldMappingResult(f"education[{edu_level}].education_level", "exact_rule", 0.95)
+            if "学位" in clean_key:
+                return FieldMappingResult(f"education[{edu_level}].academic_degree", "exact_rule", 0.95)
+            if "入学" in clean_key and any(k in clean_key for k in ("时间", "日期", "年月")):
+                return FieldMappingResult(f"education[{edu_level}].start_date", "exact_rule", 0.95)
+            if "毕业" in clean_key and any(k in clean_key for k in ("时间", "日期", "年月")):
+                return FieldMappingResult(f"education[{edu_level}].end_date", "exact_rule", 0.95)
+            if "绩点" in clean_key or "gpa" in clean_key:
+                return FieldMappingResult(f"education[{edu_level}].gpa", "exact_rule", 0.95)
+
         # -----------------------------------------------------------------
         # Tier 2: Canonical Exact Rules
         # -----------------------------------------------------------------

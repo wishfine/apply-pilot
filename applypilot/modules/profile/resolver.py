@@ -128,6 +128,75 @@ class ValueResolver:
                         curr = cls._resolve_highest_education(curr)
                         if curr is None:
                             return None
+                    elif val in (
+                        "bachelor",
+                        "master",
+                        "doctor",
+                        "associate",
+                        "high_school",
+                        "undergraduate",
+                        "本科",
+                        "硕士",
+                        "博士",
+                        "专科",
+                        "大专",
+                        "高中",
+                    ):
+                        if not isinstance(curr, (list, tuple)) or not curr:
+                            return None
+                        matched = None
+                        target_levels = {
+                            "bachelor": (EducationLevel.BACHELOR, "bachelor"),
+                            "undergraduate": (EducationLevel.BACHELOR, "bachelor"),
+                            "本科": (EducationLevel.BACHELOR, "bachelor"),
+                            "master": (EducationLevel.MASTER, "master"),
+                            "硕士": (EducationLevel.MASTER, "master"),
+                            "研究生": (EducationLevel.MASTER, "master"),
+                            "doctor": (EducationLevel.DOCTOR, "doctor"),
+                            "博士": (EducationLevel.DOCTOR, "doctor"),
+                            "associate": (EducationLevel.ASSOCIATE, "associate"),
+                            "大专": (EducationLevel.ASSOCIATE, "associate"),
+                            "专科": (EducationLevel.ASSOCIATE, "associate"),
+                            "high_school": (EducationLevel.HIGH_SCHOOL, "high_school"),
+                            "高中": (EducationLevel.HIGH_SCHOOL, "high_school"),
+                        }.get(val, ())
+                        for item in curr:
+                            item_lvl = _get_val(item, "education_level")
+                            if item_lvl in target_levels or (hasattr(item_lvl, "value") and item_lvl.value in target_levels):
+                                matched = item
+                                break
+                            if _get_val(item, "id") in (f"edu_{val}", val):
+                                matched = item
+                                break
+                        if matched is not None:
+                            curr = matched
+                        else:
+                            return None
+                    elif val in ("father", "mother", "spouse", "child", "父亲", "母亲", "配偶", "子女"):
+                        if not isinstance(curr, (list, tuple)) or not curr:
+                            return None
+                        rel_map = {
+                            "father": ("父亲", "父", "爸爸", "family_father", "father"),
+                            "父亲": ("父亲", "父", "爸爸", "family_father", "father"),
+                            "mother": ("母亲", "母", "妈妈", "family_mother", "mother"),
+                            "母亲": ("母亲", "母", "妈妈", "family_mother", "mother"),
+                            "spouse": ("配偶", "丈夫", "妻子", "爱人", "family_spouse", "spouse"),
+                            "配偶": ("配偶", "丈夫", "妻子", "爱人", "family_spouse", "spouse"),
+                            "child": ("子女", "儿子", "女儿", "family_child", "child"),
+                            "子女": ("子女", "儿子", "女儿", "family_child", "child"),
+                        }
+                        targets = rel_map.get(val, ())
+                        matched = None
+                        for item in curr:
+                            rel = str(_get_val(item, "relation") or "")
+                            item_id = str(_get_val(item, "id") or "")
+                            if any(t == rel or t in rel for t in targets) or item_id in targets:
+                                matched = item
+                                break
+                        if matched is not None:
+                            curr = matched
+                        else:
+                            return None
                     else:
                         if re.match(r"^-?\d+$", val):
                             idx = int(val)
@@ -162,33 +231,43 @@ class ValueResolver:
                                 if matched is not None:
                                     curr = matched
                                 else:
-                                    # Fallback for assets
+                                    # Fallback for assets: strictly enforce asset type
                                     if curr and any(
                                         hasattr(item, "asset_type")
                                         or (isinstance(item, dict) and "asset_type" in item)
                                         for item in curr
                                     ):
+                                        val_lower = str(val).lower()
+                                        is_resume_request = "resume" in val_lower or "cv" in val_lower or "简历" in val_lower
+
                                         fallback_asset = None
-                                        # 1. First asset with asset_type == "resume_pdf"
-                                        for item in curr:
-                                            if _get_val(item, "asset_type") == "resume_pdf":
-                                                fallback_asset = item
-                                                break
-                                        # 2. First asset whose file_path ends with .pdf
-                                        if fallback_asset is None:
+                                        if is_resume_request:
+                                            # 1. Look for asset with asset_type == "resume_pdf" or "resume"
                                             for item in curr:
-                                                fp = str(_get_val(item, "file_path") or "")
-                                                if fp.lower().endswith(".pdf"):
+                                                atype = str(_get_val(item, "asset_type") or "").lower()
+                                                if atype in ("resume_pdf", "resume"):
                                                     fallback_asset = item
                                                     break
-                                        # 3. First asset in profile.assets
-                                        if fallback_asset is None and len(curr) > 0:
-                                            fallback_asset = curr[0]
-
-                                        if fallback_asset is not None:
+                                            # 2. Look for asset whose file_path contains resume keywords AND ends with .pdf
+                                            if fallback_asset is None:
+                                                for item in curr:
+                                                    fp = str(_get_val(item, "file_path") or "").lower()
+                                                    if any(k in fp for k in ("resume", "cv", "简历")) and fp.endswith(".pdf"):
+                                                        fallback_asset = item
+                                                        break
+                                            # Strictly return matching resume or None. Never pick arbitrary PDF!
                                             curr = fallback_asset
+                                            if curr is None:
+                                                return None
                                         else:
-                                            return None
+                                            # Non-resume request: match by asset_type
+                                            for item in curr:
+                                                if str(_get_val(item, "asset_type") or "").lower() == val_lower:
+                                                    fallback_asset = item
+                                                    break
+                                            curr = fallback_asset
+                                            if curr is None:
+                                                return None
                                     else:
                                         return None
                             elif isinstance(curr, dict):

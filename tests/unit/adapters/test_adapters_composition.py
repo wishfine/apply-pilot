@@ -167,6 +167,7 @@ async def test_generic_application_adapter():
     adv = await adapter.advance(mock_page, stage)
     assert adv is False
 
+    mock_page.execute_unsafe_script = AsyncMock(return_value=True)
     is_final = await adapter.is_final_review(mock_page)
     assert is_final is True
 
@@ -199,6 +200,7 @@ async def test_moka_application_adapter():
     stage = await adapter.detect_stage(mock_page)
     assert stage == "moka_form"
     assert await adapter.advance(mock_page, stage) is False
+    mock_page.execute_unsafe_script = AsyncMock(return_value=True)
     assert await adapter.is_final_review(mock_page) is True
 
 

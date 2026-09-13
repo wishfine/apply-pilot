@@ -161,12 +161,14 @@ class ApplyEngine:
             # -----------------------------------------------------------------
             # a. Application Record Management
             # -----------------------------------------------------------------
-            app_id = f"app_{target.job.job_id}"
             cycle = target.job.recruitment_cycle or "default"
             app_key = f"{profile.profile_id}:{target.job.job_id}:{cycle}"
 
-            existing_app = await self.app_repo.get_application(app_id)
-            if not existing_app:
+            existing_app = await self.app_repo.get_application_by_key(app_key)
+            if existing_app:
+                app_id = existing_app["id"]
+            else:
+                app_id = f"app_{profile.profile_id}_{target.job.job_id}"
                 await self.app_repo.create_application(
                     app_id=app_id,
                     application_key=app_key,
@@ -561,6 +563,63 @@ class ApplyEngine:
                 # Re-read all controls after filling, including radio groups.
                 await self._refresh_readiness(stage_scanned_fields, scanned_elements)
 
+                if len(stage_scanned_fields) == 0:
+                    is_login = False
+                    if hasattr(adapter, "is_login_page"):
+                        login_res = await adapter.is_login_page(page)
+                        is_login = login_res is True
+                    elif page and hasattr(page, "execute_unsafe_script"):
+                        try:
+                            login_res = await page.execute_unsafe_script(
+                                "Detect login page signals",
+                                """() => {
+                                    const text = (document.body ? document.body.innerText : '') || '';
+                                    return /(请先登录|扫码登录|微信扫码|账号密码登录|短信登录|登录后投递|立即登录|验证码登录|请登录)/i.test(text);
+                                }""",
+                            )
+                            is_login = login_res is True
+                        except Exception:
+                            is_login = False
+
+                    if is_login:
+                        logger.warning("检测到当前页面为登录页面，暂停等待用户在浏览器中完成登录")
+                        await self.event_repo.append_event(
+                            event_id=f"evt_{uuid.uuid4().hex[:12]}",
+                            run_id=run_id,
+                            event_type="LOGIN_REQUIRED",
+                            payload_json={"stage": current_stage, "page_url": target_url},
+                        )
+                        return await self._pause_application(
+                            app_id, run_id, target_url, "login_required", snap_id
+                        )
+
+                    is_review = (
+                        (await adapter.is_final_review(page)) is True
+                        if hasattr(adapter, "is_final_review")
+                        else False
+                    )
+                    if is_review:
+                        completed_normally = True
+                        break
+
+                    advanced = False
+                    if hasattr(adapter, "advance"):
+                        adv_res = await adapter.advance(page, current_stage)
+                        advanced = adv_res is True
+                    if advanced:
+                        continue
+
+                    logger.warning("阶段 '%s' 未检测到有效表单控件或终审状态，暂停等待人工核查", current_stage)
+                    await self.event_repo.append_event(
+                        event_id=f"evt_{uuid.uuid4().hex[:12]}",
+                        run_id=run_id,
+                        event_type="PAGE_UNRECOGNIZED",
+                        payload_json={"stage": current_stage, "page_url": target_url},
+                    )
+                    return await self._pause_application(
+                        app_id, run_id, target_url, current_stage, snap_id
+                    )
+
                 # Stage readiness diagnostics and interactive resolution
                 report = ReadinessAuditor.audit_fields(
                     stage_scanned_fields, profile, variant
@@ -635,9 +694,8 @@ class ApplyEngine:
                 if hasattr(adapter, "advance"):
                     advanced = await adapter.advance(page, current_stage)
                 if not advanced:
-                    return await self._pause_application(
-                        app_id, run_id, target_url, current_stage, snap_id
-                    )
+                    completed_normally = True
+                    break
 
             if not completed_normally:
                 await self.app_repo.update_run_status(

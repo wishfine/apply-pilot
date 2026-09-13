@@ -11,6 +11,7 @@ from applypilot.adapters.applications.beisen import (
     BeisenModalSchoolPicker,
 )
 from applypilot.adapters.applications.generic import (
+    DateInputFiller,
     FileUploadFiller,
     GenericApplicationAdapter,
     NativeSelectFiller,
@@ -28,6 +29,7 @@ __all__ = [
     "BeisenApplicationAdapter",
     "BeisenModalSchoolPicker",
     "ComponentFiller",
+    "DateInputFiller",
     "FillResult",
     "FileUploadFiller",
     "GenericApplicationAdapter",

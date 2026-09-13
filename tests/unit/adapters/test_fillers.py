@@ -576,18 +576,18 @@ def test_value_resolver_assets_fallback_by_pdf_extension():
                 title="证书",
             ),
             AssetRecord(
-                asset_id="my_pdf",
+                asset_id="my_resume",
                 asset_type="custom",
-                file_path="/path/to/document.pdf",
-                title="文档",
+                file_path="/path/to/my_resume.pdf",
+                title="我的简历",
             ),
         ],
     )
     val = ValueResolver.resolve(profile, None, "assets[asset_resume_pdf].file_path")
-    assert val == "/path/to/document.pdf"
+    assert val == "/path/to/my_resume.pdf"
 
 
-def test_value_resolver_assets_fallback_to_first_asset():
+def test_value_resolver_assets_strictly_rejects_non_resume_fallback():
     profile = CandidateProfile(
         profile_id="cand_assets_04",
         assets=[
@@ -600,7 +600,7 @@ def test_value_resolver_assets_fallback_to_first_asset():
         ],
     )
     val = ValueResolver.resolve(profile, None, "assets[asset_resume_pdf].file_path")
-    assert val == "/path/to/doc.docx"
+    assert val is None
 
 
 @pytest.mark.asyncio

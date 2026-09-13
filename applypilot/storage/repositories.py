@@ -85,8 +85,20 @@ class ApplicationRepository:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT * FROM applications WHERE id = ?",
-                (app_id,),
+                "SELECT * FROM applications WHERE id = ? OR canonical_job_id = ?",
+                (app_id, app_id.removeprefix("app_")),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def get_application_by_key(
+        self, application_key: str
+    ) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM applications WHERE application_key = ?",
+                (application_key,),
             ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
@@ -98,18 +110,15 @@ class ApplicationRepository:
     ) -> List[Dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            query = "SELECT * FROM applications"
+            query = "SELECT * FROM applications WHERE 1=1"
             params: list[Any] = []
-            conditions: list[str] = []
             if status:
-                conditions.append("status = ?")
+                query += " AND status = ?"
                 params.append(status)
             if candidate_id:
-                conditions.append("candidate_id = ?")
+                query += " AND candidate_id = ?"
                 params.append(candidate_id)
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
-            query += " ORDER BY updated_at DESC"
+            query += " ORDER BY created_at DESC"
             async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
@@ -209,8 +218,13 @@ class ApplicationRepository:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT * FROM application_runs WHERE application_id = ? ORDER BY run_index ASC",
-                (application_id,),
+                """
+                SELECT * FROM application_runs 
+                WHERE application_id = ? 
+                   OR application_id IN (SELECT id FROM applications WHERE canonical_job_id = ?)
+                ORDER BY run_index ASC
+                """,
+                (application_id, application_id.removeprefix("app_")),
             ) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
@@ -285,11 +299,12 @@ class CheckpointRepository:
             async with db.execute(
                 """
                 SELECT * FROM application_checkpoints
-                WHERE application_id = ?
+                WHERE application_id = ? 
+                   OR application_id IN (SELECT id FROM applications WHERE canonical_job_id = ?)
                 ORDER BY created_at DESC, rowid DESC
                 LIMIT 1
                 """,
-                (application_id,),
+                (application_id, application_id.removeprefix("app_")),
             ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None

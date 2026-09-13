@@ -115,7 +115,16 @@ async def test_events_and_checkpoints_created(tmp_path: Path):
     db_file = tmp_path / "test.db"
     await init_db(db_file)
     mock_browser, mock_page = _create_mock_browser_and_page()
-    mock_page.find_all = AsyncMock(return_value=[])
+    mock_el = AsyncMock()
+    mock_el.get_attribute = AsyncMock(
+        side_effect=lambda attr: {
+            "name": "姓名",
+            "type": "text",
+            "id": "name_field",
+        }.get(attr)
+    )
+    mock_el.get_text = AsyncMock(return_value="")
+    mock_page.find_all = AsyncMock(return_value=[mock_el])
 
     engine = ApplyEngine(db_path=db_file, browser_backend=mock_browser)
     profile = _create_sample_profile()

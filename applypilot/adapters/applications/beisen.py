@@ -12,6 +12,7 @@ from applypilot.adapters.applications.base import (
     FillResult,
 )
 from applypilot.adapters.applications.generic import (
+    DateInputFiller,
     FileUploadFiller,
     NativeSelectFiller,
     RadioCheckboxFiller,
@@ -76,6 +77,7 @@ class BeisenApplicationAdapter(BaseApplicationAdapter):
             else [
                 BeisenModalSchoolPicker(),
                 FileUploadFiller(),
+                DateInputFiller(),
                 NativeSelectFiller(),
                 RadioCheckboxFiller(),
                 StandardInputFiller(),

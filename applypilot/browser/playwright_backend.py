@@ -161,10 +161,16 @@ class PlaywrightElement:
         except Exception as e:
             raise BrowserDriverError(f"clear_text failed: {e}") from e
 
-    async def select_option(self, value: str) -> None:
+    async def select_option(self, value: str, *, label: Optional[str] = None) -> None:
         try:
             await self._throttle()
-            await self._locator.select_option(value=value, timeout=self._policy.action_timeout_ms)
+            if label is not None:
+                await self._locator.select_option(label=label, timeout=self._policy.action_timeout_ms)
+                return
+            try:
+                await self._locator.select_option(value=value, timeout=self._policy.action_timeout_ms)
+            except Exception:
+                await self._locator.select_option(label=value, timeout=self._policy.action_timeout_ms)
         except BrowserDriverError:
             raise
         except Exception as e:
@@ -219,6 +225,15 @@ class PlaywrightElement:
             raise
         except Exception as e:
             raise BrowserDriverError(f"scroll_into_view failed: {e}") from e
+
+    async def evaluate(self, expression: str, arg: Any = None) -> Any:
+        try:
+            await self._throttle()
+            return await self._locator.evaluate(expression, arg, timeout=self._policy.action_timeout_ms)
+        except BrowserDriverError:
+            raise
+        except Exception as e:
+            raise BrowserDriverError(f"evaluate failed: {e}") from e
 
 
 class PlaywrightPage:

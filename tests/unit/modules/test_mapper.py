@@ -232,7 +232,7 @@ def test_semantic_keyword_matching():
         ("联系电话", "contact.mobile"),
         ("个人邮箱", "contact.email"),
         ("企业email地址", "contact.email"),
-        ("本科院校", "education[__HIGHEST__].school_name"),
+        ("就读院校", "education[__HIGHEST__].school_name"),
         ("录取学校", "education[__HIGHEST__].school_name"),
         ("主修专业", "education[__HIGHEST__].major"),
         ("已获学历", "education[__HIGHEST__].education_level"),

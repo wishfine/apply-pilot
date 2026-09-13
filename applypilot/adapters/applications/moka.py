@@ -9,6 +9,7 @@ from applypilot.adapters.applications.base import (
     FillResult,
 )
 from applypilot.adapters.applications.generic import (
+    DateInputFiller,
     FileUploadFiller,
     NativeSelectFiller,
     RadioCheckboxFiller,
@@ -70,6 +71,7 @@ class MokaApplicationAdapter(BaseApplicationAdapter):
             else [
                 MokaSearchSelectFiller(),
                 FileUploadFiller(),
+                DateInputFiller(),
                 NativeSelectFiller(),
                 RadioCheckboxFiller(),
                 StandardInputFiller(),
@@ -84,4 +86,12 @@ class MokaApplicationAdapter(BaseApplicationAdapter):
         return False
 
     async def is_final_review(self, page: Any) -> bool:
-        return True
+        if not page or not hasattr(page, "execute_unsafe_script"):
+            return False
+        result = await page.execute_unsafe_script(
+            "Detect Moka final submission control",
+            """() => Array.from(document.querySelectorAll('button, input[type=submit], input[type=button]'))
+                .some(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden'
+                    && /^(提交|提交申请|确认提交|提交简历|Submit|Submit application)$/i.test((el.textContent || el.value || '').trim()))""",
+        )
+        return result is True

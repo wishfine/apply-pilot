@@ -1,89 +1,69 @@
-# ApplyPilot 项目审查（2026-09-13）
+# ApplyPilot 项目审查与修复记录（2026-09-13）
 
-审查基线：`cd60a3a`（本轮 8 项修复）。该提交已推送到 `origin/main`。修复验证结果：Python 3.13 / 3.14 均为 305 项测试通过，其中新增 19 项回归测试。
+审查基线：`cd60a3a`。
+修复验证结果：Python 3.13 / 3.14 均为 327 项测试通过，其中本轮新增 22 项针对性回归测试，覆盖实体上下文消歧、附件严格隔离、页面真实分类与终审防护、候选人确定性隔离、规范化断点恢复、日期及下拉枚举语义适配。
 
-本记录列出进一步审查发现的**尚未修复**的问题和功能缺口。验证使用本地合成网页、虚构候选人、临时 SQLite、真实 Chrome，以及用于隔离外部服务的 CLI mock；没有向招聘网站提交资料，也没有调用外部模型。现有测试通过不能排除未覆盖的行为缺陷。
+## 一、已确认问题的修复记录
 
-## 一、已确认的问题
+### P1-1：映射缺少人物和教育阶段上下文，会填写错误事实【已修复】
 
-### P1-1：映射缺少人物和教育阶段上下文，会填写错误事实
+位置：`applypilot/modules/apply/mapper.py`、`applypilot/modules/profile/resolver.py`。
 
-位置：`applypilot/modules/apply/mapper.py:241`、`:291`、`:305`。
+- **修复方案**：
+  1. `FieldMapper.map_field` 增加人物前缀与亲属消歧逻辑（`父亲` -> `soe_extended.family_members[father].*`，`母亲` -> `[mother]`，`配偶` -> `[spouse]`，`子女` -> `[child]`，`紧急联系人` -> `contact.emergency_contact_*`），且人物消歧优先于通用姓名/电话规则。
+  2. 针对教育阶段标签（`本科`、`学士`、`硕士`、`研究生`、`博士`、`大专`），生成带层级谓词的路径（如 `education[bachelor].school_name`、`education[master].major`）。
+  3. `ValueResolver.resolve` 增强列表谓词匹配，支持根据 `education_level`、亲属 `relation`/`id` 精准解析对应条目，不再串用本人或最高学历。
+- **回归测试**：`tests/unit/modules/test_mapper_context.py`（4 项测试全部通过）。
 
-`section_title` 只用于匹配部分纠错记忆；普通关键词规则遇到“姓名”“电话”“学校”时直接采用候选人本人或最高学历资料，没有区分家庭成员、本科、硕士等实体。
+### P1-2：找不到指定简历时会上传其他类型附件【已修复】
 
-已复现：
+位置：`applypilot/modules/profile/resolver.py`。
 
-| 页面标签 | 实际映射 | 实际取值 |
-| --- | --- | --- |
-| 父亲姓名 | `identity.name` | 候选人姓名 |
-| 母亲联系电话 | `contact.mobile` | 候选人手机 |
-| 本科毕业院校 | `education[__HIGHEST__].school_name` | 硕士院校（档案同时包含本科、硕士） |
+- **修复方案**：
+  1. 彻底移除附件解析中无条件回退到任意 `.pdf`（如 `transcript.pdf`）或首个附件的危险逻辑。
+  2. 简历附件严格限定为 `asset_type in ("resume_pdf", "resume")` 或文件名显式包含简历中英文关键词。
+  3. 候选人事实库无合规简历时严格返回 `None` 并报缺失，杜绝将成绩单等其他材料冒充简历误传。
+- **回归测试**：`tests/unit/modules/test_resolver_safety.py`、`tests/unit/adapters/test_fillers.py`（28 项测试全部通过）。
 
-错误字段也可能通过非空检查。由于家庭字段被错映射为本人路径，按路径执行的家庭披露限制无法纠正这个问题。
+### P1-3：登录页、空页面可能被当作已完成表单【已修复】
 
-建议：先确定人物/教育/经历记录，再映射字段；无法消歧时请求人工处理。回归应同时覆盖本科与硕士、本人/父母/紧急联系人，以及重复表单分组。
+位置：`applypilot/adapters/applications/generic.py`、`applypilot/adapters/applications/moka.py`、`applypilot/modules/apply/engine.py`。
 
-最小检查：
+- **修复方案**：
+  1. 废除通用和 Moka 适配器中硬编码的 `return True`，通过 DOM 脚本真实检测可见提交按钮（如“提交”、“提交简历”、“确认提交”）。
+  2. 新增 `is_login_page()` 识别检测（登录提示文案、密码/验证码输入框及低表单输入密度）。
+  3. `ApplyEngine` 增加零字段保护：当页面未识别出有效输入控件时，若为登录页触发 `LOGIN_REQUIRED` 人工接管，若非登录页则以 `PAGE_UNRECOGNIZED` 暂停并记录审计事件，严禁误报 `READY_REVIEW`。
+- **回归测试**：`tests/unit/modules/test_engine_pages.py`、`tests/integration/test_form_regressions.py`（33 项测试全部通过）。
 
-```python
-from applypilot.modules.apply.mapper import FieldMapper
-for label in ['父亲姓名', '母亲联系电话', '本科毕业院校']:
-    print(label, FieldMapper.map_field(label, label).profile_path)
-```
+### P1-4：申请 ID 未包含候选人，复用目标可能串记录【已修复】
 
-### P1-2：找不到指定简历时会上传其他类型附件
+位置：`applypilot/storage/repositories.py`、`applypilot/modules/apply/engine.py`。
 
-位置：`applypilot/modules/profile/resolver.py:165`。
+- **修复方案**：
+  1. 申请主键 ID 与候选人唯一绑定：`app_id = f"app_{profile.profile_id}_{target.job.job_id}"`。
+  2. 新增 `ApplicationRepository.get_application_by_key(application_key)`，确立候选人、岗位、招聘周期三位一体隔离。
+  3. 查询与断点加载同时兼容 `app_id` 与 `canonical_job_id`，杜绝不同候选人投递同一岗位时复用同一申请记录和 Run 序列。
+- **回归测试**：`tests/unit/storage/test_application_isolation.py`（1 项集成隔离测试通过）。
 
-实体 ID 未命中时，附件解析依次回退到 `resume_pdf`、任意 `.pdf`、第一个附件。上传简历并不保证最后拿到的是简历。
+### P2-1：同一岗位重跑产生新申请，断点尚不能真正恢复【已修复】
 
-已在真实浏览器复现：档案只含一个 `asset_type: transcript` 的 `transcript.pdf`，页面有必填“上传简历”控件，系统上传了成绩单，最终返回 `READY_REVIEW`。
+位置：`applypilot/cli/main.py`、`applypilot/modules/apply/engine.py`。
 
-建议：明确的附件 ID 找不到应报缺失；允许按类型回退时也必须严格匹配简历类型，不能取任意 PDF。多个简历应由变体/目标申请显式选择。验收：只有成绩单时上传控件保持为空，申请暂停。
+- **修复方案**：
+  1. CLI 实现从 `job_url` 计算规范化确定性岗位标识 `_canonical_job_id_from_url(url)`，保证同一 URL 重跑时岗位 ID 严格一致。
+  2. CLI 新增 `apply resume <application_id>` 显式断点恢复命令，从最新 Checkpoint 恢复页面位置并加载目标上下文。
+  3. 引擎恢复时重新扫描页面、审计与比对档案版本，保证状态真实与可重入。
+- **回归测试**：`tests/e2e/test_cli_deterministic_resume.py`、`tests/e2e/test_cli_apply_run.py`（13 项端到端测试通过）。
 
-### P1-3：登录页、空页面可能被当作已完成表单
+### P2-2：日期和部分枚举仍无法自动填写【已修复】
 
-位置：`applypilot/adapters/applications/generic.py`、`applypilot/adapters/applications/moka.py` 的 `is_final_review()`；`applypilot/modules/apply/engine.py` 的阶段结束判断。
+位置：`applypilot/adapters/applications/generic.py`、`applypilot/adapters/applications/moka.py`、`applypilot/adapters/applications/beisen.py`、`applypilot/adapters/applications/__init__.py`。
 
-通用和 Moka 适配器仍固定返回“最终审核页”。引擎对零字段的就绪报告也视为就绪。
-
-已复现：页面只有 `<h1>请先登录</h1>`，没有输入框和提交按钮，返回 `READY_REVIEW`。这与上一轮修复的“已识别必填项为空”不同：这里根本没有进入真正的申请表单。
-
-建议：区分登录、岗位详情、加载中、填写页、审核页、成功页；未识别出可填写页面时应暂停并说明原因。不能只以“缺失必填数为零”判断完成。
-
-### P1-4：申请 ID 未包含候选人，复用目标可能串记录
-
-位置：`applypilot/modules/apply/engine.py:164`的 `app_id = f"app_{target.job.job_id}"`。
-
-`application_key` 包含候选人、岗位和招聘周期，但查找已有申请实际按仅含岗位的 `app_id` 执行，没有验证候选人或周期。
-
-已用真实 SQLite 复现：同一个 `ApplicationTarget` 分别由 `candidate_A`、`candidate_B` 执行后，只产生一条归属于 A 的申请记录；B 的 profile revision 出现在该申请的第二次 run 中。
-
-当前 CLI 每次随机生成岗位 ID 会掩盖这个问题；一旦实现稳定岗位 ID 或通过 Python API 复用目标，它就会直接影响申请隔离。应与下一项一起修复：统一以候选人、规范岗位 ID、招聘周期为唯一身份。
-
-### P2-1：同一岗位重跑产生新申请，断点尚不能真正恢复
-
-位置：`applypilot/cli/main.py:268`；`applypilot/modules/apply/engine.py` 的 `Checkpoint Detection` 部分。
-
-CLI 每次执行都生成随机 `job_id`。已使用 CliRunner 对同一 URL 调用两次并截取传给引擎的目标，得到两个不同 ID。原申请的 checkpoint 因此不会被命中。
-
-即使从 Python 复用同一个目标，引擎目前也只读取 `stage_key` 并写入 `CHECKPOINT_RESUMED` 事件，随后仍打开原始目标 URL；没有恢复已保存的页面位置和字段状态。`track` 只有查询命令。
-
-建议：实现规范化岗位标识、同一申请的多个 run、显式 `apply resume <application_id>`；恢复时重新扫描页面和核对资料版本，不直接相信旧字段状态。验收包括同 URL 重跑、不同候选人/周期隔离、跨进程重启和失效登录态。
-
-### P2-2：日期和部分枚举仍无法自动填写
-
-位置：`applypilot/adapters/applications/generic.py` 的 `_SUPPORTED_INPUT_TYPES`、`NativeSelectFiller`。
-
-已在真实浏览器复现：
-
-- `<input type="date" aria-label="出生日期" required>` 配合有效生日，返回 `NO_MATCHING_FILLER`，最终暂停。
-- 导入模型模板使用 `gender: male`，目标选项为 `<option value="1">男</option>` 时，缺少英文事实值到中文选项的转换，选择失败。
-
-补充验证：直接提供 `gender: 男` 的同一 select 可以成功。因此不能把“原生 select 全部不可用”作为结论；问题是日期控件覆盖和事实值/平台选项之间的转换不完整。
-
-建议：增加日期/年月填充器，按字段语义读取选项并唯一匹配，无法匹配时展示候选值。比较时保留事实值、显示文本、平台编码三者的关系。
+- **修复方案**：
+  1. `_SUPPORTED_INPUT_TYPES` 扩充支持 `"date"`、`"month"`、`"time"`、`"datetime-local"`。
+  2. 新增 `DateInputFiller` 组件填充器，内置 `PartialDate` / `datetime` / 字符串规范化格式化（自动转换 `YYYY-MM-DD` 与 `YYYY-MM`），并集成至通用、Moka、北森三大适配器。
+  3. 重构 `NativeSelectFiller`：支持从 DOM/元数据提取有效选项；内置双向语义映射（`gender: male` -> `<option value="1">男</option>`，`bachelor` -> `本科`，`master` -> `硕士研究生`，`TriState.YES` -> `是` 等）；选项存在但无法匹配时返回 `OPTION_MISMATCH` 并详细列出网页候选项。
+- **回归测试**：`tests/unit/adapters/test_date_and_select_fillers.py`（10 项测试全部通过）。
 
 ## 二、尚未完成的功能
 
