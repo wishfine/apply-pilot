@@ -230,7 +230,7 @@ class ApplyEngine:
                     "Detect login page signals",
                     """() => {
                         const text = (document.body ? document.body.innerText : '') || '';
-                        const loginPath = /(?:^|\\/)(?:login|signin|auth|passport)(?:\\/|$)/i.test(
+                        const loginPath = /(login|signin|auth|passport)/i.test(
                             (() => { try { return new URL(location.href).pathname; } catch (_) { return ''; } })()
                         );
                         const strongLoginText = /(请先登录|扫码登录|微信扫码|账号密码登录|短信登录|登录后投递|验证码登录)/i.test(text);
@@ -242,7 +242,14 @@ class ApplyEngine:
                         const loginFormButton = Array.from(document.querySelectorAll(
                             'form button, form input[type=submit], [role=dialog] button, [role=dialog] input[type=submit]'
                         )).some(el => visible(el) && /登录|sign in|log in/i.test((el.textContent || el.value || '').trim()));
-                        return loginPath || strongLoginText || authInputs.length > 0 || loginFormButton;
+                        const loginInputs = Array.from(document.querySelectorAll(
+                            'input[placeholder*=手机号], input[placeholder*=验证码], input[name*=phone], input[name*=mobile], input[name*=code]'
+                        )).filter(visible);
+                        const loginButton = Array.from(document.querySelectorAll(
+                            'button, input[type=button], input[type=submit]'
+                        )).some(el => visible(el) && /登录|sign in|log in/i.test((el.textContent || el.value || '').trim()));
+                        return loginPath || strongLoginText || authInputs.length > 0 || loginFormButton
+                            || (loginButton && loginInputs.length > 0);
                     }""",
                 )
                 return result is True

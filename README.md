@@ -7,7 +7,7 @@
 *One profile. Every application.*
 
 [![Python](https://img.shields.io/badge/Python-%3E%3D3.11-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/Tests-414%20Passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-415%20Passed-brightgreen.svg)](tests/)
 [![Architecture](https://img.shields.io/badge/Design-Local--first-orange.svg)](docs/superpowers/specs/2026-09-12-apply-pilot-v0.1-design.md)
 
 </div>
@@ -184,7 +184,7 @@ APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run pytest tests/integration/ -q
 APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run --isolated --python 3.13 --locked pytest -q
 ```
 
-当前共有 414 项测试，其中包含真实浏览器表单回归、同源 iframe、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
+当前共有 415 项测试，其中包含真实浏览器表单回归、同源 iframe、延迟短信登录页、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
 
 测试通过说明已覆盖的行为符合断言，不代表真实招聘站点全功能兼容。后续重点包括上下文映射、附件类型约束、登录与页面识别、可恢复申请状态机，以及真实平台组件适配。
 

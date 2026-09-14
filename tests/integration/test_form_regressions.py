@@ -120,6 +120,19 @@ async def test_hydrated_login_page_is_reclassified_before_field_scan(form):
 
 
 @pytest.mark.asyncio
+async def test_sms_login_page_with_phone_fields_is_detected(form):
+    page, _, _ = form
+    await page.set_content(
+        '<div>应届生求职登录</div>'
+        '<input placeholder="请输入手机号">'
+        '<input placeholder="请输入短信验证码">'
+        '<button>登录</button>'
+    )
+    wrapped = PlaywrightPage(page, InteractionPolicy(action_timeout_ms=500, min_action_interval_ms=0))
+    assert await GenericApplicationAdapter().is_login_page(wrapped) is True
+
+
+@pytest.mark.asyncio
 async def test_moka_picker_does_not_click_unrelated_global_list_item(form):
     page, _, _ = form
     await page.set_content('<input aria-label="学校"><ul><li>清华大学</li></ul>')
