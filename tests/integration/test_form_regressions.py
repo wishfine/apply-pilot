@@ -105,6 +105,21 @@ async def test_login_help_text_without_auth_controls_is_not_login_page(form):
 
 
 @pytest.mark.asyncio
+async def test_hydrated_login_page_is_reclassified_before_field_scan(form):
+    page, run, db = form
+    await page.set_content(
+        """<script>
+        setTimeout(() => { document.body.innerHTML = '<h1>欢迎登录</h1><input type="password">'; }, 250);
+        </script>"""
+    )
+    status, engine = await run()
+    assert status == ApplicationStatus.PAUSED
+    runs = await engine.app_repo.list_runs_by_application("app_fixture")
+    events = await engine.event_repo.list_events_by_run(runs[0]["id"])
+    assert any(event["event_type"] == "LOGIN_REQUIRED" for event in events)
+
+
+@pytest.mark.asyncio
 async def test_moka_picker_does_not_click_unrelated_global_list_item(form):
     page, _, _ = form
     await page.set_content('<input aria-label="学校"><ul><li>清华大学</li></ul>')

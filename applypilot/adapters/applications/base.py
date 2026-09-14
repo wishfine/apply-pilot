@@ -126,6 +126,9 @@ class BaseApplicationAdapter:
                 const visible = el => !!el.getClientRects().length
                     && getComputedStyle(el).visibility !== 'hidden';
                 const text = (document.body ? document.body.innerText : '') || '';
+                const loginPath = /(?:^|\\/)(?:login|signin|auth|passport)(?:\\/|$)/i.test(
+                    (() => { try { return new URL(location.href).pathname; } catch (_) { return ''; } })()
+                );
                 const strongLoginText = /(请先登录|扫码登录|微信扫码|账号密码登录|短信登录|登录后投递|验证码登录)/i.test(text);
                 const strongLoginHeading = Array.from(document.querySelectorAll(
                     'h1, h2, h3, [role=heading], [role=dialog]'
@@ -139,7 +142,7 @@ class BaseApplicationAdapter:
                 const visibleControls = Array.from(document.querySelectorAll(
                     'input:not([type=hidden]), select, textarea, button'
                 )).filter(visible);
-                return strongLoginHeading || authInputs.length > 0 || loginFormButton
+                return loginPath || strongLoginHeading || authInputs.length > 0 || loginFormButton
                     || (strongLoginText && visibleControls.length === 0);
             }""",
         )

@@ -230,6 +230,9 @@ class ApplyEngine:
                     "Detect login page signals",
                     """() => {
                         const text = (document.body ? document.body.innerText : '') || '';
+                        const loginPath = /(?:^|\\/)(?:login|signin|auth|passport)(?:\\/|$)/i.test(
+                            (() => { try { return new URL(location.href).pathname; } catch (_) { return ''; } })()
+                        );
                         const strongLoginText = /(请先登录|扫码登录|微信扫码|账号密码登录|短信登录|登录后投递|验证码登录)/i.test(text);
                         const visible = el => !!el.getClientRects().length
                             && getComputedStyle(el).visibility !== 'hidden';
@@ -239,7 +242,7 @@ class ApplyEngine:
                         const loginFormButton = Array.from(document.querySelectorAll(
                             'form button, form input[type=submit], [role=dialog] button, [role=dialog] input[type=submit]'
                         )).some(el => visible(el) && /登录|sign in|log in/i.test((el.textContent || el.value || '').trim()));
-                        return strongLoginText || authInputs.length > 0 || loginFormButton;
+                        return loginPath || strongLoginText || authInputs.length > 0 || loginFormButton;
                     }""",
                 )
                 return result is True
@@ -641,6 +644,32 @@ class ApplyEngine:
                         "input:not([type='hidden']), select, textarea",
                         timeout_ms=self.form_hydration_timeout_ms,
                     )
+                    # Navigation can finish before a login redirect or its
+                    # hydrated controls appear.  Reclassify immediately after
+                    # the hydration wait so a login form is never filled as a
+                    # normal application page.
+                    if await self._is_login_page(adapter, page):
+                        logger.warning("检测到当前页面为登录页面，等待用户在浏览器中完成登录")
+                        await self.event_repo.append_event(
+                            event_id=f"evt_{uuid.uuid4().hex[:12]}",
+                            run_id=run_id,
+                            event_type="LOGIN_REQUIRED",
+                            payload_json={"stage": current_stage, "page_url": audit_url},
+                        )
+                        if (
+                            self.interactive_readiness
+                            and hasattr(self.browser, "wait_for_user")
+                            and login_retry_attempts < 3
+                        ):
+                            login_retry_attempts += 1
+                            await self.browser.wait_for_user(
+                                "检测到登录或验证页面。请在浏览器中完成登录、短信验证或授权，页面进入网申表单后回到终端按回车继续"
+                            )
+                            await _refresh_after_user_handoff()
+                            continue
+                        return await self._pause_application(
+                            app_id, run_id, target_url, "login_required", snap_id
+                        )
                     for element in elements:
                         try:
                             live_state = await self._live_field(element)

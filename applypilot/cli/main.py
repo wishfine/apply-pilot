@@ -414,7 +414,9 @@ def _execute_apply_session(
             browser_backend=browser,
             interactive_readiness=interactive_readiness,
             readiness_resolver=terminal_readiness_resolver if interactive_readiness else None,
-            form_hydration_timeout_ms=5000,
+            # Legacy ATS pages may redirect to a hydrated login gate several
+            # seconds after the initial document becomes ready.
+            form_hydration_timeout_ms=15000,
         )
         try:
             status = await engine.run_application_target(target, profile)
