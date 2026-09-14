@@ -7,7 +7,7 @@
 *One profile. Every application.*
 
 [![Python](https://img.shields.io/badge/Python-%3E%3D3.11-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/Tests-407%20Passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-413%20Passed-brightgreen.svg)](tests/)
 [![Architecture](https://img.shields.io/badge/Design-Local--first-orange.svg)](docs/superpowers/specs/2026-09-12-apply-pilot-v0.1-design.md)
 
 </div>
@@ -45,7 +45,7 @@ uv sync
 uv run playwright install chromium
 ```
 
-项目声明 Python >= 3.11；最近一次完整测试在 Python 3.11 和 3.14 上均为 407 项通过。
+项目声明 Python >= 3.11；最近一次完整测试在 Python 3.11 和 3.14 上均为 413 项通过。
 
 ### 2. 统一资料目录
 
@@ -101,6 +101,14 @@ uv run applypilot profile show
 uv run applypilot apply run -u "https://目标招聘网站/实际表单地址"
 ```
 
+为避免从聊天窗口复制 Markdown 链接时把 `[标题](URL)` 一起带入，推荐把目标地址保存到应用目录的 `config.yaml`：
+
+```yaml
+job_url: "https://目标招聘网站/实际表单地址"
+```
+
+之后可以直接运行 `uv run applypilot apply run`；也可以用 `-c/--config` 指定其他配置文件。命令行仍支持 `-u/--job-url`，并会自动解包标准 Markdown 链接、还原被转义的 `&`，对缺少 `http(s)` 或主机名的输入直接报错。
+
 尽量使用已登录、已打开填写步骤的表单地址。浏览器使用独立的持久化目录，不会自动复用你日常 Chrome 的登录状态；遇到登录、短信验证或暂时未加载出控件的页面时，交互模式会保持浏览器打开并提示你完成操作，回到终端按回车后重新扫描。
 
 运行时：
@@ -139,7 +147,7 @@ uv run applypilot apply resume app_xxx -p "$APPLYPILOT_HOME/profile.yaml"
 | `profile import` | `-f/--file`；`-o/--output`；`-m/--model`；`-b/--base-url`；`-k/--api-key` |
 | `profile validate` | `-p/--path`，必填 |
 | `profile show` | `-p/--path`，默认读取应用目录的 `profile.yaml` |
-| `apply run` | `-u/--job-url`，必填；`-p/--profile`；`--headless`；`--interactive-readiness/--no-interactive-readiness` |
+| `apply run` | `-u/--job-url`（或配置文件中的 `job_url`）；`-c/--config`；`-p/--profile`；`--headless`；`--interactive-readiness/--no-interactive-readiness` |
 | `track list` | `-s/--status` |
 | `track status` | 申请 ID |
 
@@ -152,6 +160,7 @@ uv run applypilot apply resume app_xxx -p "$APPLYPILOT_HOME/profile.yaml"
 ```text
 ~/.applypilot/
 ├── profile.yaml
+├── config.yaml
 ├── applypilot.db
 ├── .audit_secret
 └── browser_profile/
@@ -175,7 +184,7 @@ APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run pytest tests/integration/ -q
 APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run --isolated --python 3.13 --locked pytest -q
 ```
 
-当前共有 407 项测试，其中包含真实浏览器表单回归、同源 iframe、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
+当前共有 413 项测试，其中包含真实浏览器表单回归、同源 iframe、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
 
 测试通过说明已覆盖的行为符合断言，不代表真实招聘站点全功能兼容。后续重点包括上下文映射、附件类型约束、登录与页面识别、可恢复申请状态机，以及真实平台组件适配。
 

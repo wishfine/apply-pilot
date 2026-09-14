@@ -107,6 +107,7 @@ def test_interaction_policy_defaults():
     assert policy.min_action_interval_ms == 150
     assert policy.action_timeout_ms == 10000
     assert policy.max_retries == 3
+    assert policy.navigation_timeout_ms == 30000
 
     custom = InteractionPolicy(min_action_interval_ms=50, action_timeout_ms=5000, max_retries=1)
     assert custom.min_action_interval_ms == 50
@@ -351,7 +352,9 @@ async def test_playwright_backend_lifecycle(tmp_path: Path):
         # open_page
         opened_page = await backend.open_page("https://example.com/apply")
         assert isinstance(opened_page, BrowserPage)
-        mock_page.goto.assert_awaited_once_with("https://example.com/apply", timeout=10000)
+        mock_page.goto.assert_awaited_once_with(
+            "https://example.com/apply", timeout=30000, wait_until="domcontentloaded"
+        )
 
         # current_page
         curr_page = await backend.current_page()
@@ -421,7 +424,9 @@ async def test_playwright_backend_creates_new_page_when_busy(tmp_path: Path):
 
         opened = await backend.open_page("https://new-job.com")
         mock_context.new_page.assert_awaited_once()
-        new_page.goto.assert_awaited_once_with("https://new-job.com", timeout=10000)
+        new_page.goto.assert_awaited_once_with(
+            "https://new-job.com", timeout=30000, wait_until="domcontentloaded"
+        )
         assert isinstance(opened, BrowserPage)
 
 

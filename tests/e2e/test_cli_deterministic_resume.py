@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from typer.testing import CliRunner
 
-from applypilot.cli.main import app, _canonical_job_id_from_url
+from applypilot.cli.main import app, _canonical_job_id_from_url, _normalize_job_url
 from applypilot.storage.database import init_db
 from applypilot.storage.repositories import ApplicationRepository, CheckpointRepository
 from applypilot.domain.job import ApplicationStatus
@@ -27,6 +27,11 @@ def test_canonical_job_id_ignores_volatile_application_parameters():
     base = "https://iflytek.zhiye.com/form?jobAdId=abc123&fromPage=job&userId=200540681"
     changed = "https://iflytek.zhiye.com/form?userId=999999&jobAdId=abc123&fromPage=detail"
     assert _canonical_job_id_from_url(base) == _canonical_job_id_from_url(changed)
+
+
+def test_normalize_job_url_accepts_markdown_and_escaped_ampersands():
+    value = "[job](https://example.com/form?jobAdId=abc\\&seqid=0)"
+    assert _normalize_job_url(value) == "https://example.com/form?jobAdId=abc&seqid=0"
 
 
 def test_cli_apply_resume_command_resumes_application(tmp_path: Path, monkeypatch):

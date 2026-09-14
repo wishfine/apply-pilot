@@ -3,7 +3,9 @@ from applypilot.core.config import (
     ApplyPilotConfig,
     get_app_home_dir,
     get_browser_dir,
+    get_config_path,
     get_db_path,
+    load_config,
 )
 from applypilot.core.exceptions import (
     AdapterError,
@@ -50,6 +52,22 @@ def test_default_config_instantiation():
     assert cfg.llm_api_base == "https://api.deepseek.com/v1"
     assert cfg.llm_model == "deepseek-chat"
     assert cfg.debug_screenshots is False
+    assert cfg.job_url is None
+
+
+def test_load_config_reads_job_url_from_app_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPLYPILOT_HOME", str(tmp_path))
+    config_path = get_config_path()
+    config_path.write_text(
+        "job_url: 'https://example.com/apply?id=123'\n", encoding="utf-8"
+    )
+    config = load_config()
+    assert config.job_url == "https://example.com/apply?id=123"
+
+
+def test_load_config_missing_file_returns_defaults(tmp_path):
+    config = load_config(tmp_path / "missing.yaml")
+    assert config.job_url is None
 
 
 def test_exceptions_hierarchy():

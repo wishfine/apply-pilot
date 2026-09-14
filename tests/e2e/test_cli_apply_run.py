@@ -52,6 +52,45 @@ def test_apply_run_default_profile_missing_exits_with_error(tmp_path: Path, monk
     assert "Profile file not found at" in res.stdout
 
 
+def test_apply_run_uses_job_url_from_config(
+    sample_profile_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("APPLYPILOT_HOME", str(tmp_path))
+    (tmp_path / "config.yaml").write_text(
+        "job_url: 'https://jobs.example.com/apply/from-config'\n", encoding="utf-8"
+    )
+    mock_browser = AsyncMock()
+    mock_browser.close = AsyncMock()
+    with patch("applypilot.cli.main.PlaywrightBackend", return_value=mock_browser), patch(
+        "applypilot.cli.main.ApplyEngine.run_application_target",
+        new_callable=AsyncMock,
+        return_value=ApplicationStatus.READY_REVIEW,
+    ) as mock_run_target:
+        res = runner.invoke(
+            app, ["apply", "run", "-p", str(sample_profile_file), "--headless"]
+        )
+    assert res.exit_code == 0, res.stdout
+    target = mock_run_target.await_args.args[0]
+    assert target.job.apply_url == "https://jobs.example.com/apply/from-config"
+
+
+def test_apply_run_rejects_missing_job_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("APPLYPILOT_HOME", str(tmp_path))
+    res = runner.invoke(app, ["apply", "run"])
+    assert res.exit_code == 2
+    assert "未提供招聘页面 URL" in res.stdout
+
+
+def test_apply_run_rejects_unwrapped_invalid_url(sample_profile_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("APPLYPILOT_HOME", str(tmp_path))
+    res = runner.invoke(
+        app,
+        ["apply", "run", "-u", "jobs.example.com/apply/1", "-p", str(sample_profile_file)],
+    )
+    assert res.exit_code == 2
+    assert "无效的招聘页面 URL" in res.stdout
+
+
 def test_apply_run_success_flow(sample_profile_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("APPLYPILOT_HOME", str(tmp_path))
 
@@ -472,4 +511,3 @@ def test_apply_run_non_headless_no_duplicate_wait_for_user(
         # main.py does not make a redundant wait_for_user call
         mock_browser.wait_for_user.assert_not_called()
         mock_browser.close.assert_awaited_once()
-

@@ -12,6 +12,7 @@ import asyncio
 import inspect
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse
@@ -25,7 +26,13 @@ import typer
 import yaml
 
 from applypilot.browser import PlaywrightBackend
-from applypilot.core.config import get_app_home_dir, get_browser_dir, get_db_path
+from applypilot.core.config import (
+    get_app_home_dir,
+    get_browser_dir,
+    get_config_path,
+    get_db_path,
+    load_config,
+)
 from applypilot.domain.job import ApplicationStatus, ApplicationTarget, Job
 from applypilot.domain.profile import CandidateProfile
 from applypilot.domain.variant import DisclosurePolicy, ResumeVariant
@@ -250,6 +257,22 @@ def _update_in_memory_profile(prof: Any, path: str, val: Any) -> None:
                 raise
 
 
+def _normalize_job_url(value: str) -> str:
+    """Normalize a pasted URL and reject values that browsers cannot navigate."""
+    raw = str(value or "").strip()
+    markdown = re.fullmatch(r"\[[^\]]+\]\((https?://[^\s)]+)\)", raw)
+    if markdown:
+        raw = markdown.group(1)
+    # Markdown copied from terminals/chat clients may escape ampersands.
+    raw = raw.replace(r"\&", "&").strip()
+    parsed = urlparse(raw)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(
+            "无效的招聘页面 URL。请传入纯 http(s) 地址；不要包含 Markdown 的 [标题](URL) 包装。"
+        )
+    return raw
+
+
 def _canonical_job_id_from_url(url: str) -> str:
     parsed = urlparse(url.strip())
     netloc = parsed.netloc.lower()
@@ -424,12 +447,20 @@ def _execute_apply_session(
 
 @apply_app.command("run")
 def apply_run(
-    job_url: str = typer.Option(..., "--job-url", "-u", help="URL of the target job application page"),
+    job_url: Optional[str] = typer.Option(
+        None, "--job-url", "-u", help="URL of the target job application page (optional when config.yaml has job_url)"
+    ),
     profile_path: Optional[Path] = typer.Option(
         None,
         "--profile",
         "-p",
         help="Path to candidate profile YAML (defaults to ~/.applypilot/profile.yaml)",
+    ),
+    config_path: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yaml (defaults to the ApplyPilot data directory)",
     ),
     headless: bool = typer.Option(
         False, "--headless", help="Run browser in headless mode (default: visible browser for user oversight)"
@@ -441,13 +472,27 @@ def apply_run(
     ),
 ) -> None:
     """Execute automated job application for a specific target URL."""
-    console.print(f"[bold blue]Starting ApplyPilot session for: {job_url}[/bold blue]")
-    console.print(f"Headless mode: {headless}")
-    console.print(f"Interactive readiness: {interactive_readiness}")
-    if profile_path:
-        console.print(f"Using profile from: {profile_path}")
-
     try:
+        config_file = config_path or get_config_path()
+        if job_url is None:
+            job_url = load_config(config_file).job_url
+        if not job_url:
+            console.print(
+                f"[bold red]未提供招聘页面 URL。请使用 -u/--job-url，或在 {config_file} 写入 job_url: https://...[/bold red]"
+            )
+            raise typer.Exit(code=2)
+        try:
+            job_url = _normalize_job_url(job_url)
+        except ValueError as exc:
+            console.print(f"[bold red]{exc}[/bold red]")
+            raise typer.Exit(code=2)
+
+        console.print(f"[bold blue]Starting ApplyPilot session for: {job_url}[/bold blue]")
+        console.print(f"Headless mode: {headless}")
+        console.print(f"Interactive readiness: {interactive_readiness}")
+        if profile_path:
+            console.print(f"Using profile from: {profile_path}")
+
         # 1. Locate candidate profile
         prof_path = profile_path or (get_app_home_dir() / "profile.yaml")
         if not prof_path.exists():

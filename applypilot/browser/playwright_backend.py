@@ -522,7 +522,11 @@ class PlaywrightBackend:
                 newly_opened = True
 
             try:
-                await page.goto(url, timeout=self.policy.action_timeout_ms)
+                await page.goto(
+                    url,
+                    timeout=self.policy.navigation_timeout_ms,
+                    wait_until="domcontentloaded",
+                )
             except Exception:
                 if newly_opened and hasattr(page, "close"):
                     try:

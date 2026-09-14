@@ -12,6 +12,7 @@ class ElementRect(BaseModel):
 class InteractionPolicy(BaseModel):
     min_action_interval_ms: int = 150
     action_timeout_ms: int = 10000
+    navigation_timeout_ms: int = 30000
     max_retries: int = 3
 
 
