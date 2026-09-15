@@ -214,6 +214,7 @@ APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run --isolated --python 3.13 --locked pyte
 
 - [初始设计](docs/superpowers/specs/2026-09-12-apply-pilot-v0.1-design.md)
 - [导入与就绪诊断设计](docs/superpowers/specs/2026-09-12-resume-ingestion-and-readiness-diagnostics-design.md)
+- [简历与网页字段匹配 API 设计](docs/superpowers/specs/2026-09-15-profile-mapping-api-design.md)
 - [本轮审查：剩余 bug、功能缺口与优先级](docs/reviews/2026-09-13-project-audit.md)
 
 仓库目前尚未提供 `LICENSE` 文件，正式发布前需要补齐许可文本。请在真实投递前核实资料和附件，最终提交由用户完成。
