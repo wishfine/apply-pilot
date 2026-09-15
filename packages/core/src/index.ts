@@ -56,14 +56,30 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "英文名": { path: "identity.english_name", value: (p) => p.identity?.english_name },
   "性别": { path: "identity.gender", value: (p) => p.identity?.gender },
   "民族": { path: "identity.ethnicity", value: (p) => p.identity?.ethnicity },
+  "证件类型": { path: "identity.id_type", value: (p) => p.identity?.id_type },
   "身份证号": { path: "identity.id_number", value: (p) => p.identity?.id_number },
+  "证件号码": { path: "identity.id_number", value: (p) => p.identity?.id_number },
+  "证件编号": { path: "identity.id_number", value: (p) => p.identity?.id_number },
   "出生日期": { path: "identity.birth_date", value: (p) => display(p.identity?.birth_date) },
+  "出生地": { path: "soe_extended.native_place", value: (p) => p.soe_extended?.native_place },
+  "健康状况": { path: "identity.health_status", value: (p) => p.identity?.health_status },
+  "健康状态": { path: "identity.health_status", value: (p) => p.identity?.health_status },
+  "婚姻状况": { path: "identity.marital_status", value: (p) => p.identity?.marital_status },
   "手机号": { path: "contact.mobile", value: (p) => p.contact?.mobile },
   "手机号码": { path: "contact.mobile", value: (p) => p.contact?.mobile },
   "手机": { path: "contact.mobile", value: (p) => p.contact?.mobile },
   "电子邮箱": { path: "contact.email", value: (p) => p.contact?.email },
   "邮箱": { path: "contact.email", value: (p) => p.contact?.email },
   "现居城市": { path: "contact.current_city", value: (p) => p.contact?.current_city },
+  "现居住地": { path: "contact.current_city", value: (p) => p.contact?.current_city },
+  "现居地址": { path: "contact.current_address", value: (p) => p.contact?.current_address },
+  "国籍": { path: "identity.nationality", value: (p) => p.identity?.nationality },
+  "国籍地区": { path: "identity.nationality", value: (p) => p.identity?.nationality },
+  "QQ": { path: "contact.qq", value: (p) => p.contact?.qq },
+  "微信": { path: "contact.wechat", value: (p) => p.contact?.wechat },
+  "微信号": { path: "contact.wechat", value: (p) => p.contact?.wechat },
+  "籍贯": { path: "soe_extended.native_place", value: (p) => p.soe_extended?.native_place },
+  "户口所在地": { path: "soe_extended.household_registration", value: (p) => p.soe_extended?.household_registration },
   "政治面貌": { path: "soe_extended.political_status", value: (p) => p.soe_extended?.political_status },
   "毕业院校": { path: "education[highest].school_name", value: (p) => highest(p.education)?.school_name },
   "学校名称": { path: "education[highest].school_name", value: (p) => highest(p.education)?.school_name },
@@ -80,6 +96,30 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "入学时间": { path: "education[highest].start_date", value: (p) => display(highest(p.education)?.start_date) },
 };
 
+const experienceAliases: Record<string, { path: string; value: (profile: CandidateProfile) => unknown }> = {
+  "公司名称": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
+  "单位名称": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
+  "实习单位": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
+  "实习公司": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
+  "工作单位": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
+  "职位": { path: "experiences[latest].title", value: (p) => latestExperience(p.experiences)?.title },
+  "岗位": { path: "experiences[latest].title", value: (p) => latestExperience(p.experiences)?.title },
+  "岗位名称": { path: "experiences[latest].title", value: (p) => latestExperience(p.experiences)?.title },
+  "职务": { path: "experiences[latest].title", value: (p) => latestExperience(p.experiences)?.title },
+  "部门": { path: "experiences[latest].department", value: (p) => latestExperience(p.experiences)?.department },
+  "所在城市": { path: "experiences[latest].city", value: (p) => latestExperience(p.experiences)?.city },
+  "工作城市": { path: "experiences[latest].city", value: (p) => latestExperience(p.experiences)?.city },
+  "开始时间": { path: "experiences[latest].start_date", value: (p) => display(latestExperience(p.experiences)?.start_date) },
+  "入职时间": { path: "experiences[latest].start_date", value: (p) => display(latestExperience(p.experiences)?.start_date) },
+  "实习开始时间": { path: "experiences[latest].start_date", value: (p) => display(latestExperience(p.experiences)?.start_date) },
+  "结束时间": { path: "experiences[latest].end_date", value: (p) => display(latestExperience(p.experiences)?.end_date) },
+  "离职时间": { path: "experiences[latest].end_date", value: (p) => display(latestExperience(p.experiences)?.end_date) },
+  "实习结束时间": { path: "experiences[latest].end_date", value: (p) => display(latestExperience(p.experiences)?.end_date) },
+  "工作内容": { path: "experiences[latest].description_bullets", value: (p) => experienceDescription(p.experiences) },
+  "实习内容": { path: "experiences[latest].description_bullets", value: (p) => experienceDescription(p.experiences) },
+  "工作描述": { path: "experiences[latest].description_bullets", value: (p) => experienceDescription(p.experiences) },
+};
+
 function display(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const date = value as { year?: number; month?: number; day?: number };
@@ -93,6 +133,28 @@ function highest(records: Array<Record<string, unknown>> | undefined) {
   return [...(records || [])].sort((a, b) => weight(b.education_level) - weight(a.education_level))[0];
 }
 
+function latestExperience(records: Array<Record<string, unknown>> | undefined) {
+  const internships = (records || []).filter((record) => {
+    const type = String(record.experience_type || record.type || "").toLowerCase();
+    return !type || type.includes("intern") || type.includes("实习");
+  });
+  return [...(internships.length ? internships : records || [])].sort((a, b) => dateSortKey(b.end_date || b.start_date).localeCompare(dateSortKey(a.end_date || a.start_date)))[0];
+}
+
+function dateSortKey(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const date = value as { year?: number; month?: number; day?: number };
+    if (date.year) return `${date.year}-${String(date.month || 0).padStart(2, "0")}-${String(date.day || 0).padStart(2, "0")}`;
+  }
+  return "";
+}
+
+function experienceDescription(records: Array<Record<string, unknown>> | undefined) {
+  const bullets = latestExperience(records)?.description_bullets;
+  return Array.isArray(bullets) ? bullets.filter((bullet): bullet is string => typeof bullet === "string").join("\n") : undefined;
+}
+
 function weight(value: unknown) {
   const text = String(value || "").toLowerCase();
   if (text.includes("doctor") || text.includes("博士")) return 5;
@@ -103,20 +165,21 @@ function weight(value: unknown) {
 }
 
 function normalize(value: string) {
-  return value.replace(/[\s:*：()（）【】\[\]必选填项]/g, "").toLowerCase();
+  return value.replace(/[\s:*：\/／,，.。·()（）【】\[\]必选填项_-]/g, "").toLowerCase();
 }
 
-function fieldKey(field: PageField) {
+function fieldKey(field: PageField, section?: string) {
   const value = normalize(`${field.label}${field.name}`);
-  return Object.keys(aliases).find((key) => value === normalize(key) || value.includes(normalize(key))) || "";
+  const keys = section === "实习经历" ? Object.keys(experienceAliases) : Object.keys(aliases);
+  return keys.find((key) => value === normalize(key) || value.includes(normalize(key))) || "";
 }
 
-export function mapFields(fields: PageField[], profile?: CandidateProfile): FieldPlan[] {
+export function mapFields(fields: PageField[], profile?: CandidateProfile, section?: string): FieldPlan[] {
   return fields.map((field) => {
     if (field.value.trim()) return { field, decision: "skip", reason: "已有内容，已保留" };
     if (!profile) return { field, decision: "review", reason: "请先导入候选人资料" };
-    const key = fieldKey(field);
-    const rule = aliases[key];
+    const key = fieldKey(field, section);
+    const rule = (section === "实习经历" ? experienceAliases[key] : undefined) || aliases[key];
     if (!rule) return { field, decision: "review", reason: "没有唯一的字段规则，请手动选择资料" };
     const value = rule.value(profile);
     if (value === undefined || value === null || String(value).trim() === "") return { field, decision: "review", profilePath: rule.path, reason: `资料缺少：${rule.path}` };

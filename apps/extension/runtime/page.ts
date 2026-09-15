@@ -11,7 +11,7 @@ export type PageField = {
 };
 
 export type PageSection = { ref: string; label: string; active: boolean };
-export type PageScan = { url: string; title: string; fields: PageField[]; sections: PageSection[]; documentReady: boolean; pageState: "form" | "login" | "loading" | "empty"; embeddedFrameCount: number };
+export type PageScan = { url: string; title: string; fields: PageField[]; sections: PageSection[]; activeSection?: string; documentReady: boolean; pageState: "form" | "login" | "loading" | "empty"; embeddedFrameCount: number };
 export type FillReceipt = { ok: boolean; message: string; value?: string };
 export type FilePayload = { name: string; type: string; bytes: number[] };
 
@@ -27,7 +27,7 @@ export function scanPage(): PageScan {
   const usefulLabel = (value: string, hint: string) => {
     const candidate = clean(value);
     if (!candidate) return "";
-    if (/^(请输入|请选择|选择|上传文件|点击上传|点击选择|请填写|选填|必填)$/i.test(candidate)) return "";
+    if (/^(请输入|请选择|选择|上传文件|点击上传|点击选择|请填写|选填|必填)(?:\.\.\.|…)?$/i.test(candidate)) return "";
     return candidate.length <= 80 ? candidate : "";
   };
   const textWithoutControls = (node: Element) => {
@@ -108,11 +108,13 @@ export function scanPage(): PageScan {
     element.setAttribute("data-applypilot-section-ref", ref);
     sections.push({ ref, label: matched, active: /active|selected|current/i.test(element.className) || element.getAttribute("aria-current") === "page" || element.getAttribute("aria-selected") === "true" });
   }
+  const activeHeading = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend")).filter(visible).map((element) => clean(element.textContent)).map((label) => knownSections.find((candidate) => label === candidate || label.startsWith(candidate))).find(Boolean);
   const bodyText = clean(document.body?.innerText).slice(0, 12000);
   const loginPath = /(^|\/)(login|signin|auth|passport|xyzlogin)(?:\/|$)/i.test(location.pathname);
   const loginText = /(请先登录|欢迎登录|扫码登录|微信扫码登录|账号密码登录|短信登录|登录后投递|验证码登录)/i.test(bodyText);
   const pageState: PageScan["pageState"] = document.readyState === "loading" ? "loading" : loginPath || loginText ? "login" : fields.length ? "form" : "empty";
-  return { url: location.href, title: document.title, fields, sections, documentReady: document.readyState !== "loading", pageState, embeddedFrameCount: document.querySelectorAll("iframe").length };
+  const activeSection = sections.find((section) => section.active)?.label || activeHeading;
+  return { url: location.href, title: document.title, fields, sections, activeSection, documentReady: document.readyState !== "loading", pageState, embeddedFrameCount: document.querySelectorAll("iframe").length };
 }
 
 /** This function is self-contained because Chrome serializes it for injection. */

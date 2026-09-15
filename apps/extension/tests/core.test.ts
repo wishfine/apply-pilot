@@ -25,6 +25,13 @@ describe("extension field planning", () => {
     expect(plan.every((item) => item.decision === "fill")).toBe(true);
   });
 
+  it("maps common personal labels used by enterprise recruitment forms", () => {
+    const detailedProfile = { ...profile, identity: { ...profile.identity, id_number: "110101200001010011", nationality: "中国" }, contact: { ...profile.contact, current_city: "武汉市", qq: "10001", wechat: "zhangsan" }, soe_extended: { native_place: "湖北省武汉市", household_registration: "湖北省武汉市" } };
+    const plan = mapFields([field("证件号码"), field("国籍/地区"), field("籍贯"), field("现居住地"), field("QQ"), field("微信号")], detailedProfile);
+    expect(plan.map((item) => item.proposedValue)).toEqual(["110101200001010011", "中国", "湖北省武汉市", "武汉市", "10001", "zhangsan"]);
+    expect(plan.every((item) => item.decision === "fill")).toBe(true);
+  });
+
   it("never overwrites an existing value and explains missing mappings", () => {
     const plan = mapFields([field("姓名", "用户已填写"), field("自定义问题")], profile);
     expect(plan[0]).toMatchObject({ decision: "skip", reason: "已有内容，已保留" });
@@ -34,6 +41,13 @@ describe("extension field planning", () => {
   it("does not guess radio or checkbox state", () => {
     const choice = { ...field("性别"), kind: "choice" };
     expect(mapFields([choice], profile)[0]).toMatchObject({ decision: "review", reason: "选择控件需要确认具体选项" });
+  });
+
+  it("maps the active internship section to the most recent internship", () => {
+    const experienceProfile = { ...profile, experiences: [{ id: "old", experience_type: "internship", org_name: "旧公司", title: "实习生", start_date: "2024-01", end_date: "2024-06", description_bullets: ["旧经历"] }, { id: "new", experience_type: "internship", org_name: "新东方教育科技集团", title: "AI 算法实习生", start_date: "2026-05", end_date: "2026-09", description_bullets: ["算法建模"] }] };
+    const plan = mapFields([field("公司名称"), field("职位"), field("工作内容")], experienceProfile, "实习经历");
+    expect(plan.map((item) => item.proposedValue)).toEqual(["新东方教育科技集团", "AI 算法实习生", "算法建模"]);
+    expect(plan.every((item) => item.decision === "fill")).toBe(true);
   });
 
   it("rejects malformed profile data before writing it to storage", () => {

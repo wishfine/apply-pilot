@@ -53,4 +53,15 @@ describe("page runtime", () => {
     expect(result.fields[0]).toMatchObject({ label: "姓名" });
     expect(result.sections.map((section) => section.label)).toEqual(["个人信息", "实习经历"]);
   });
+
+  it("uses the visible section heading when navigation does not expose an active state", () => {
+    document.body.innerHTML = `<h1>实习经历</h1><div class="row"><span>公司名称</span><input placeholder="请输入"></div>`;
+    const result = scanPage();
+    expect(result.activeSection).toBe("实习经历");
+  });
+
+  it("does not treat a generic ellipsis placeholder as a field label", () => {
+    document.body.innerHTML = `<div class="row"><span>邮箱</span><input placeholder="请输入..."></div>`;
+    expect(scanPage().fields[0].label).toBe("邮箱");
+  });
 });

@@ -65,8 +65,8 @@ async function ensureSiteAccess(tab: chrome.tabs.Tab): Promise<void> {
   }
 }
 
-function buildPlan(fields: PageScan["fields"]): FieldPlan[] {
-  const plan = mapFields(fields, state.profile);
+function buildPlan(fields: PageScan["fields"], section?: string): FieldPlan[] {
+  const plan = mapFields(fields, state.profile, section);
   if (!state.asset) return plan;
   const fileFields = fields.filter((field) => field.kind === "file");
   for (const item of plan) {
@@ -95,11 +95,13 @@ async function scan() {
     }
     const frames = results.map((item) => ({ frameId: item.frameId ?? 0, scan: item.result as PageScan })).filter((item) => item.scan);
     if (!frames.length) throw new Error("页面没有返回扫描结果");
-    const first = frames[0].scan;
-    state.scan = { url: first.url, title: first.title, pageState: first.pageState, documentReady: frames.every((item) => item.scan.documentReady), embeddedFrameCount: first.embeddedFrameCount, sections: first.sections, fields: frames.flatMap((item) => item.scan.fields.map((field) => ({ ...field, frameId: item.frameId }))) };
-    if (first.embeddedFrameCount > frames.length - 1) state.warning = "部分内嵌表单没有访问权限，已只扫描当前可访问的页面。";
+    const primary = frames.find((item) => item.frameId === 0) || frames[0];
+    const pageState = primary.scan.pageState !== "empty" ? primary.scan.pageState : frames.find((item) => item.scan.pageState === "form")?.scan.pageState || frames.find((item) => item.scan.pageState === "login")?.scan.pageState || "empty";
+    const sections = primary.scan.sections.length ? primary.scan.sections : frames.find((item) => item.scan.sections.length)?.scan.sections || [];
+    state.scan = { url: primary.scan.url, title: primary.scan.title, pageState, activeSection: primary.scan.activeSection || frames.find((item) => item.scan.activeSection)?.scan.activeSection, documentReady: frames.every((item) => item.scan.documentReady), embeddedFrameCount: primary.scan.embeddedFrameCount, sections, fields: frames.flatMap((item) => item.scan.fields.map((field) => ({ ...field, frameId: item.frameId }))) };
+    if (primary.scan.embeddedFrameCount > frames.length - 1) state.warning = "部分内嵌表单没有访问权限，已只扫描当前可访问的页面。";
     state.runId = crypto.randomUUID();
-    state.plan = buildPlan(state.scan.fields);
+    state.plan = buildPlan(state.scan.fields, state.scan.activeSection);
     state.receipts = {};
   } catch (error) { state.error = explainBrowserError(error, "扫描页面失败"); }
   finally { state.busy = false; render(); }
@@ -179,7 +181,7 @@ async function importProfile(file: File) {
   const profile = parseCandidateProfile(parsed);
   await store.save(profile);
   state.profile = profile;
-  if (state.scan) state.plan = buildPlan(state.scan.fields);
+  if (state.scan) state.plan = buildPlan(state.scan.fields, state.scan.activeSection);
   state.error = undefined; render();
 }
 
@@ -192,7 +194,7 @@ async function importAttachment(file: File) {
   }
   const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
   state.asset = { name: file.name, type: file.type || "application/octet-stream", bytes };
-  if (state.scan) state.plan = buildPlan(state.scan.fields);
+  if (state.scan) state.plan = buildPlan(state.scan.fields, state.scan.activeSection);
   state.error = undefined;
   render();
 }
