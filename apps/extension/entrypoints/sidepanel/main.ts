@@ -13,6 +13,14 @@ type UiState = { activeTab?: chrome.tabs.Tab; scan?: PageScan; runId?: string; p
 const state: UiState = { plan: [], receipts: {}, busy: false };
 const operations = new OperationStore();
 
+function explainBrowserError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (/cannot access|permission|not allowed|scripting/i.test(message)) {
+    return "浏览器没有授予当前网页访问权限。请点击工具栏中的 ApplyPilot 图标打开侧栏，再允许此网站权限后重新扫描。";
+  }
+  return message || fallback;
+}
+
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, children: (Node | string)[] = []) {
   const el = document.createElement(tag);
   Object.entries(attrs).forEach(([key, value]) => { if (key === "class") el.className = value; else if (key === "text") el.textContent = value; else el.setAttribute(key, value); });
@@ -21,15 +29,31 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, 
 }
 
 async function activeTab(): Promise<chrome.tabs.Tab> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !tab.url) throw new Error("当前没有可操作的网页标签页");
-  if (!/^https?:/i.test(tab.url)) throw new Error("浏览器设置页、扩展页和新标签页不能运行填写");
+  const currentWindowTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const lastFocusedTabs = currentWindowTabs.length ? [] : await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const tab = [...currentWindowTabs, ...lastFocusedTabs].find((candidate) => candidate.id !== undefined);
+  if (!tab?.id) throw new Error("当前没有可操作的网页标签页，请先选中招聘网站标签页");
+  if (!tab.url) {
+    try {
+      const hasTabsPermission = await chrome.permissions.contains({ permissions: ["tabs"] });
+      if (hasTabsPermission || await chrome.permissions.request({ permissions: ["tabs"] })) {
+        const refreshed = await chrome.tabs.get(tab.id);
+        Object.assign(tab, refreshed);
+      }
+    } catch {
+      // activeTab may still be enough to inject after the user clicked the action.
+    }
+  }
+  if (tab.url && !/^https?:/i.test(tab.url)) throw new Error("浏览器设置页、扩展页和新标签页不能运行填写");
   state.activeTab = tab;
   return tab;
 }
 
 async function ensureSiteAccess(tab: chrome.tabs.Tab): Promise<void> {
-  if (!tab.url) throw new Error("当前标签页没有可用地址");
+  // When the side panel was opened from Chrome's side-panel menu, the activeTab
+  // grant may not expose the URL to this extension page yet. executeScript can
+  // still use the temporary action grant, so do not misclassify that tab as absent.
+  if (!tab.url) return;
   const origin = new URL(tab.url).origin;
   try {
     if (await chrome.permissions.contains({ origins: [`${origin}/*`] })) return;
@@ -77,7 +101,7 @@ async function scan() {
     state.runId = crypto.randomUUID();
     state.plan = buildPlan(state.scan.fields);
     state.receipts = {};
-  } catch (error) { state.error = error instanceof Error ? error.message : "扫描页面失败"; }
+  } catch (error) { state.error = explainBrowserError(error, "扫描页面失败"); }
   finally { state.busy = false; render(); }
 }
 
@@ -128,7 +152,7 @@ async function fill() {
       }
       render();
     }
-  } catch (error) { state.error = error instanceof Error ? error.message : "填写失败"; }
+  } catch (error) { state.error = explainBrowserError(error, "填写失败"); }
   finally { state.busy = false; render(); }
 }
 
