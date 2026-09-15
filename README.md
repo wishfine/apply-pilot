@@ -45,7 +45,7 @@ uv sync
 uv run playwright install chromium
 ```
 
-项目声明 Python >= 3.11；最近一次完整测试在 Python 3.11 和 3.14 上均为 414 项通过。
+项目声明 Python >= 3.11；最近一次完整测试在 Python 3.11 和 3.14 上均为 415 项通过。
 
 ### 2. 统一资料目录
 
@@ -124,6 +124,22 @@ job_url: "https://目标招聘网站/实际表单地址"
 
 `READY_REVIEW` 目前不能证明已到达真实站点的最终提交页，也不能证明全部资料正确。未识别到终审页或无法翻页时会暂停，仍需用户核对真实站点的审核页面。`--headless` 不适合需要浏览器人工接管的流程。
 
+### 浏览器插件版（开发预览）
+
+插件和现有 Python CLI 位于同一仓库，共享资料交换格式和字段规则。插件直接在你当前已经登录的 Chrome/Edge 页面运行，不会另起一个没有登录态的浏览器，也不需要复制网申 URL。
+
+```bash
+# 在仓库根目录执行
+npm install
+npm run extension:build
+```
+
+然后打开 `chrome://extensions`，开启“开发者模式”，选择“加载已解压的扩展程序”，目录选择 `dist/extension/chrome-mv3`。点击工具栏中的 ApplyPilot 打开侧栏，在侧栏中设置资料库密码并导入现有 `profile.yaml` 或 `.json` 档案，进入招聘网站的填写页面后点击“开始填写”；首次点击会先扫描当前页，再填写能够明确匹配的字段。需要重新读取页面时再点击“扫描当前页”。
+
+插件资料在浏览器本地 IndexedDB 中保存，档案使用用户设置的密码解锁并以 AES-GCM 加密；密码不会发送到网页。默认只处理明确匹配且为空的普通文本、文本域、原生下拉和部分选择控件，已有内容会保留；登录、验证码、承诺勾选、附件和无法确认的自定义控件会提示人工处理，最终提交仍由用户完成。
+
+当前插件处于开发预览阶段，已通过 TypeScript 检查、10 项核心、页面运行时和加密存储测试，以及 WXT 构建验证，尚未声明科大讯飞、51job/中移等真实登录后页面的完整兼容。复杂下拉、级联地址、多段经历、附件和真实站点验收按[插件设计方案](docs/superpowers/specs/2026-09-15-browser-extension-design.md)继续实现。
+
 ### 5. 查看记录
 
 ```bash
@@ -177,6 +193,12 @@ uv run applypilot apply resume app_xxx -p "$APPLYPILOT_HOME/profile.yaml"
 ```bash
 uv run pytest
 
+# 浏览器插件工作区
+# 需要 Node.js >= 22
+npm run extension:typecheck
+npm run extension:test
+npm run extension:build
+
 # 强制真实浏览器回归测试实际执行，缺少浏览器时失败
 APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run pytest tests/integration/ -q
 
@@ -184,7 +206,7 @@ APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run pytest tests/integration/ -q
 APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run --isolated --python 3.13 --locked pytest -q
 ```
 
-当前共有 415 项测试，其中包含真实浏览器表单回归、同源 iframe、延迟短信登录页、申请隔离和恢复校验测试。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
+当前共有 415 项 Python 测试，另有插件工作区的 TypeScript 规划测试。Python 测试包含真实浏览器表单回归、同源 iframe、延迟短信登录页、申请隔离和恢复校验测试；插件测试覆盖中文字段映射、最高学历选择、已有内容保护和资料输入校验。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
 
 测试通过说明已覆盖的行为符合断言，不代表真实招聘站点全功能兼容。后续重点包括上下文映射、附件类型约束、登录与页面识别、可恢复申请状态机，以及真实平台组件适配。
 

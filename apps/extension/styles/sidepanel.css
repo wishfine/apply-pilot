@@ -1,0 +1,33 @@
+:root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; color: #182033; background: #f6f8fb; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+#app { padding: 16px; }
+header, .actions, .summary, .field { display: flex; align-items: center; }
+header { justify-content: space-between; margin-bottom: 18px; }
+.brand { display: flex; gap: 8px; align-items: center; font-size: 17px; }
+.mark { display: grid; place-items: center; width: 24px; height: 24px; color: white; background: #4f64e8; border-radius: 7px; font-weight: 700; }
+.version, .muted, small { color: #69738a; font-size: 12px; }
+.intro h1 { margin: 0 0 4px; font-size: 21px; }
+.intro p { margin: 0 0 14px; color: #69738a; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.actions { gap: 8px; margin-bottom: 12px; }
+button { border: 0; border-radius: 8px; padding: 10px 13px; font-weight: 600; cursor: pointer; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.primary { color: white; background: #4f64e8; }
+.secondary { color: #33406b; background: #e8ecff; }
+.card { margin-top: 12px; padding: 13px; background: white; border: 1px solid #e5e9f2; border-radius: 11px; box-shadow: 0 2px 10px #263b6510; }
+.card-title { margin-bottom: 8px; font-size: 13px; font-weight: 700; }
+input[type=file] { max-width: 100%; font-size: 12px; }
+.unlock-row { display: flex; gap: 6px; margin-bottom: 8px; }
+.unlock-row input { min-width: 0; flex: 1; padding: 8px; border: 1px solid #dfe4ef; border-radius: 7px; font-size: 12px; }
+.small-button { padding: 8px 9px; color: #33406b; background: #edf0f7; font-size: 12px; }
+.summary { min-height: 32px; color: #3e4b6a; font-size: 12px; }
+.notice { margin: 0 0 10px; padding: 9px; color: #72551b; background: #fff8e4; border-radius: 7px; font-size: 12px; line-height: 1.5; }
+.field-list { display: grid; gap: 7px; padding: 0; margin: 10px 0 0; list-style: none; }
+.field { align-items: flex-start; gap: 8px; padding: 8px 0; border-top: 1px solid #eef1f6; }
+.field strong, .field small { display: block; }
+.field strong { max-width: 215px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.field small { margin-top: 2px; line-height: 1.4; }
+.symbol { width: 18px; text-align: center; font-weight: 800; }
+.done .symbol { color: #1a9a67; }.review .symbol { color: #d48700; }.skip .symbol { color: #9aa3b4; }
+.error { margin-top: 12px; padding: 10px; color: #a3303d; background: #fff0f1; border: 1px solid #f5c8cd; border-radius: 8px; font-size: 12px; line-height: 1.5; }
+.warning { margin-top: 12px; padding: 10px; color: #72551b; background: #fff8e4; border: 1px solid #f2dfaa; border-radius: 8px; font-size: 12px; line-height: 1.5; }

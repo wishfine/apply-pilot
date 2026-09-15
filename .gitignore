@@ -41,3 +41,8 @@ htmlcov/
 *.swo
 .DS_Store
 .superpowers/
+
+# Browser extension workspace
+node_modules/
+apps/extension/.wxt/
+apps/extension/.output/

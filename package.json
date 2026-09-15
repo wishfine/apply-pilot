@@ -1,0 +1,16 @@
+{
+  "name": "apply-pilot-workspace",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "workspaces": ["apps/extension"],
+  "dependencies": {
+    "dexie": "^4.0.11"
+  },
+  "scripts": {
+    "extension:dev": "npm --prefix apps/extension run dev",
+    "extension:build": "npm --prefix apps/extension run build",
+    "extension:package": "npm --prefix apps/extension run package",
+    "extension:test": "npm --prefix apps/extension run test",
+    "extension:typecheck": "npm --prefix apps/extension run typecheck"
+  }
+}
