@@ -143,6 +143,23 @@ def test_profile_id_stays_stable_when_non_identity_facts_change():
     assert first["profile_id"] == updated["profile_id"]
 
 
+def test_normalize_structured_resume_records_adds_ids_and_publication_aliases():
+    normalized = ResumeIngestionService._normalize_profile_dict(
+        {
+            "identity": {"name": "甲"},
+            "awards": [{"award_name": "一等奖学金", "date": "2025"}],
+            "publications": [{"name": "NAS 2026", "venue": "CCF-C"}],
+            "certificates": [{"name": "英语六级"}],
+            "campus_practices": [{"name": "志愿服务"}],
+        }
+    )
+    assert normalized["awards"][0]["id"] == "award_1"
+    assert normalized["awards"][0]["name"] == "一等奖学金"
+    assert normalized["publications"][0] == {"venue": "CCF-C", "id": "pub_1", "title": "NAS 2026"}
+    assert normalized["certificates"][0]["id"] == "cert_1"
+    assert normalized["campus_practices"][0]["id"] == "practice_1"
+
+
 @pytest.mark.asyncio
 async def test_parse_text_empty_or_whitespace_raises_error():
     service = ResumeIngestionService(api_key="test_api_key")

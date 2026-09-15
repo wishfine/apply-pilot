@@ -37,12 +37,14 @@ class IdentityInfo(_StrictModel):
     pinyin_first_name: Optional[str] = None
     pinyin_last_name: Optional[str] = None
     english_name: Optional[str] = None
+    nationality: Optional[str] = None
     gender: Optional[str] = None
     birth_date: Optional[PartialDate] = None
     id_type: Optional[str] = None
     id_number: Optional[str] = None
     ethnicity: Optional[str] = None  # 严禁默认汉族
     health_status: Optional[str] = None  # 严禁默认健康
+    marital_status: Optional[str] = None
 
 
 class ContactInfo(_StrictModel):
@@ -51,6 +53,9 @@ class ContactInfo(_StrictModel):
     mobile: Optional[str] = None
     email: Optional[str] = None
     current_city: Optional[str] = None
+    current_address: Optional[str] = None
+    qq: Optional[str] = None
+    wechat: Optional[str] = None
     emergency_contact_name: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
 
@@ -101,6 +106,49 @@ class ProjectRecord(_StrictModel):
     description_bullets: list[str] = Field(default_factory=list)
     technologies_used_ids: list[str] = Field(default_factory=list)
     repo_url: Optional[str] = None
+
+
+class AwardRecord(_StrictModel):
+    """Award or scholarship fact extracted from a resume."""
+
+    id: str
+    name: str
+    date: Optional[str] = None
+    issuer: Optional[str] = None
+    description: Optional[str] = None
+
+
+class PublicationRecord(_StrictModel):
+    """Publication, thesis, or other research output fact."""
+
+    id: str
+    title: Optional[str] = None
+    venue: Optional[str] = None
+    authors: Optional[str | list[str]] = None
+    date: Optional[str] = None
+    status: Optional[str] = None
+    description: Optional[str] = None
+
+
+class CertificateRecord(_StrictModel):
+    """Certificate or qualification fact."""
+
+    id: str
+    name: Optional[str] = None
+    number: Optional[str] = None
+    date: Optional[str] = None
+    description: Optional[str] = None
+
+
+class CampusPracticeRecord(_StrictModel):
+    """Campus practice, student organization, or volunteer fact."""
+
+    id: str
+    name: Optional[str] = None
+    role: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    description: Optional[str] = None
 
 
 class SkillRecord(_StrictModel):
@@ -185,6 +233,10 @@ class CandidateProfile(_StrictModel):
     education: list[EducationRecord] = Field(default_factory=list)
     experiences: list[ExperienceRecord] = Field(default_factory=list)
     projects: list[ProjectRecord] = Field(default_factory=list)
+    awards: list[AwardRecord] = Field(default_factory=list)
+    publications: list[PublicationRecord] = Field(default_factory=list)
+    certificates: list[CertificateRecord] = Field(default_factory=list)
+    campus_practices: list[CampusPracticeRecord] = Field(default_factory=list)
     skills: list[SkillRecord] = Field(default_factory=list)
     assets: list[AssetRecord] = Field(default_factory=list)
     campus_context: ChinaCampusContext = Field(default_factory=ChinaCampusContext)

@@ -71,4 +71,19 @@ describe("page runtime", () => {
     document.body.innerHTML = `<div class="row"><span>邮箱</span><input placeholder="请输入..."></div>`;
     expect(scanPage().fields[0].label).toBe("邮箱");
   });
+
+  it("detects required markers without treating every empty input as required", () => {
+    document.body.innerHTML = `<div class="form-item"><span>* 姓名</span><input placeholder="请输入"></div><div class="form-item"><span>QQ</span><input placeholder="请输入"></div>`;
+    expect(scanPage().fields.map((field) => field.required)).toEqual([true, false]);
+  });
+
+  it("assigns fields to their nearest preceding section heading", () => {
+    document.body.innerHTML = `<h2>教育经历</h2><input aria-label="学院名称"><h2>实习经历</h2><input aria-label="单位名称">`;
+    expect(scanPage().fields.map((field) => field.section)).toEqual(["教育经历", "实习经历"]);
+  });
+
+  it("recognizes section title classes used by component libraries", () => {
+    document.body.innerHTML = `<div class="section-title">项目经历</div><input aria-label="项目名称">`;
+    expect(scanPage().fields[0].section).toBe("项目经历");
+  });
 });

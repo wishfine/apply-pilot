@@ -71,6 +71,7 @@ function buildPlan(fields: PageScan["fields"], section?: string): FieldPlan[] {
   const fileFields = fields.filter((field) => field.kind === "file");
   for (const item of plan) {
     if (item.field.kind !== "file") continue;
+    if (!item.field.required) continue;
     const text = `${item.field.label} ${item.field.name}`;
     if (fileFields.length === 1 || /简历|resume|cv/i.test(text)) {
       item.decision = "fill";
@@ -243,7 +244,8 @@ function render() {
       content.append(h("p", { class: "notice", text: "页面仍在加载填写内容，请稍后重新扫描。" }));
     }
     const counts = state.plan.reduce((acc, item) => { acc[item.decision] = (acc[item.decision] || 0) + 1; return acc; }, {} as Record<string, number>);
-    content.append(h("div", { class: "summary", text: `发现 ${state.scan.fields.length} 项 · 可填写 ${counts.fill || 0} · 待处理 ${counts.review || 0} · 跳过 ${counts.skip || 0}` }));
+    const optionalCount = state.plan.filter((item) => item.decision === "skip" && item.reason === "选填项，按要求留空").length;
+    content.append(h("div", { class: "summary", text: `发现 ${state.scan.fields.length} 项 · 必填可填写 ${counts.fill || 0} · 待处理 ${counts.review || 0} · 选填留空 ${optionalCount} · 已有内容 ${Math.max(0, (counts.skip || 0) - optionalCount)}` }));
     if (state.scan.sections.length > 1) {
       const sectionNav = h("div", { class: "section-nav" });
       sectionNav.append(h("div", { class: "section-title", text: "网站分区" }));

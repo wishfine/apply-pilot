@@ -8,6 +8,7 @@ export type PageField = {
   required: boolean;
   value: string;
   options: string[];
+  section?: string;
 };
 
 export type PageSection = { ref: string; label: string; active: boolean };
@@ -66,6 +67,20 @@ export function scanPage(): PageScan {
   const candidates: Element[] = [];
   roots.forEach((root) => root.querySelectorAll("input, textarea, select, [contenteditable='true'], [role='textbox'], [role='combobox'], [role='radio'], [role='checkbox']").forEach((element) => candidates.push(element)));
   const fields: PageField[] = [];
+  const knownSections = ["个人信息", "求职意向", "教育经历", "实习经历", "项目经历", "在校实践", "获奖情况", "论文/专著", "证书", "其他信息", "简历附件"];
+  const sectionHeadings = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, [role='heading'], [class*='section-title'], [class*='sectionTitle'], [class*='form-title'], [class*='formTitle']"));
+  const matchingSection = (value: string) => knownSections.find((candidate) => value === candidate || value.startsWith(candidate));
+  const sectionFor = (element: Element) => {
+    const fieldset = element.closest("fieldset");
+    const legend = fieldset?.querySelector(":scope > legend");
+    const fieldsetSection = legend ? matchingSection(clean(legend.textContent)) : undefined;
+    if (fieldsetSection) return fieldsetSection;
+    let previous: string | undefined;
+    for (const heading of sectionHeadings.filter(visible)) {
+      if ((heading.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) previous = matchingSection(clean(heading.textContent)) || previous;
+    }
+    return previous;
+  };
   let sequence = 0;
   for (const element of Array.from(new Set(candidates))) {
     const control = element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
@@ -83,6 +98,8 @@ export function scanPage(): PageScan {
     const explicit = clean(element.getAttribute("data-label") || element.getAttribute("data-field-label") || element.getAttribute("title"));
     const label = usefulLabel(labelledBy, hint) || usefulLabel(associated?.textContent || "", hint) || usefulLabel(nearby?.textContent || "", hint) || usefulLabel(explicit, hint) || previousSiblingLabel(element, hint) || usefulLabel(hint, hint) || usefulLabel(uploadHost?.textContent || "", hint) || (type === "file" ? "附件上传" : "");
     if (!label) continue;
+    const requiredMarker = `${label} ${nearby?.textContent || ""} ${(container?.textContent || "").slice(0, 240)} ${container?.className || ""}`;
+    const required = Boolean((control as HTMLInputElement).required || element.getAttribute("aria-required") === "true" || /[*＊]|必填|required|is-required/i.test(requiredMarker));
     let kind: PageField["kind"] = "unsupported";
     if (element instanceof HTMLSelectElement) kind = "select";
     else if (type === "file") kind = "file";
@@ -94,21 +111,20 @@ export function scanPage(): PageScan {
     element.setAttribute("data-applypilot-ref", ref);
     const options = element instanceof HTMLSelectElement ? Array.from(element.options).filter((option) => !option.disabled && clean(option.textContent)).map((option) => clean(option.textContent)) : [];
     const value = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement ? control.value : clean(element.textContent);
-    fields.push({ ref, label, name: clean(control.name || element.id || hint), type, kind, required: Boolean((control as HTMLInputElement).required || element.getAttribute("aria-required") === "true"), value, options });
+    fields.push({ ref, label, name: clean(control.name || element.id || hint), type, kind, required, value, options, section: sectionFor(element) });
   }
-  const knownSections = ["个人信息", "求职意向", "教育经历", "实习经历", "项目经历", "在校实践", "获奖情况", "论文/专著", "证书", "其他信息", "简历附件"];
   const sections: PageSection[] = [];
   const sectionCandidates = document.querySelectorAll("a, button, [role='tab'], [role='menuitem'], [class*='menu-item'], [class*='nav-item'], [class*='side-item']");
   for (const element of Array.from(sectionCandidates)) {
     if (!visible(element)) continue;
     const label = clean(element.textContent);
-    const matched = knownSections.find((candidate) => label === candidate || label.startsWith(candidate));
+    const matched = matchingSection(label);
     if (!matched || sections.some((section) => section.label === matched)) continue;
     const ref = `ap-section-${sections.length}`;
     element.setAttribute("data-applypilot-section-ref", ref);
     sections.push({ ref, label: matched, active: /active|selected|current/i.test(element.className) || element.getAttribute("aria-current") === "page" || element.getAttribute("aria-selected") === "true" });
   }
-  const activeHeading = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend")).filter(visible).map((element) => clean(element.textContent)).map((label) => knownSections.find((candidate) => label === candidate || label.startsWith(candidate))).find(Boolean);
+  const activeHeading = sectionHeadings.filter(visible).map((element) => matchingSection(clean(element.textContent))).find(Boolean);
   const bodyText = clean(document.body?.innerText).slice(0, 12000);
   const loginPath = /(^|\/)(login|signin|auth|passport|xyzlogin)(?:\/|$)/i.test(location.pathname);
   const loginText = /(请先登录|欢迎登录|扫码登录|微信扫码登录|账号密码登录|短信登录|登录后投递|验证码登录)/i.test(bodyText);

@@ -6,7 +6,7 @@ export default defineConfig({
   manifest: {
     name: "ApplyPilot 网申助手",
     description: "在当前已登录的招聘页面中安全、可解释地辅助填写申请表",
-    version: "0.1.3",
+    version: "0.1.4",
     permissions: ["activeTab", "scripting", "storage", "sidePanel"],
     optional_permissions: ["tabs"],
     optional_host_permissions: ["http://*/*", "https://*/*"],

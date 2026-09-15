@@ -6,6 +6,10 @@ export type CandidateProfile = {
   education?: Array<Record<string, unknown>>;
   experiences?: Array<Record<string, unknown>>;
   projects?: Array<Record<string, unknown>>;
+  awards?: Array<Record<string, unknown>>;
+  publications?: Array<Record<string, unknown>>;
+  certificates?: Array<Record<string, unknown>>;
+  campus_practices?: Array<Record<string, unknown>>;
   skills?: Array<Record<string, unknown>>;
   campus_context?: Record<string, unknown>;
   soe_extended?: Record<string, unknown>;
@@ -23,6 +27,7 @@ export type PageField = {
   required: boolean;
   value: string;
   options: string[];
+  section?: string;
 };
 
 export type FieldPlan = {
@@ -33,6 +38,8 @@ export type FieldPlan = {
   reason: string;
 };
 
+type MappingSource = "base" | "experience" | "project" | "award" | "publication" | "certificate" | "practice";
+
 export function parseCandidateProfile(input: unknown): CandidateProfile {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("资料文件必须是对象");
   const profile = input as Record<string, unknown>;
@@ -40,7 +47,7 @@ export function parseCandidateProfile(input: unknown): CandidateProfile {
   for (const key of ["identity", "contact", "campus_context", "soe_extended"] as const) {
     if (profile[key] !== undefined && (typeof profile[key] !== "object" || profile[key] === null || Array.isArray(profile[key]))) throw new Error(`${key} 必须是对象`);
   }
-  for (const key of ["education", "experiences", "projects", "skills", "assets"] as const) {
+  for (const key of ["education", "experiences", "projects", "awards", "publications", "certificates", "campus_practices", "skills", "assets"] as const) {
     if (profile[key] !== undefined && !Array.isArray(profile[key])) throw new Error(`${key} 必须是数组`);
     if (Array.isArray(profile[key]) && profile[key].some((item) => !item || typeof item !== "object" || Array.isArray(item))) throw new Error(`${key} 中的每一项必须是对象`);
   }
@@ -99,7 +106,10 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "开始时间": { path: "education[highest].start_date", value: (p) => display(highest(p.education)?.start_date) },
   "开始日期": { path: "education[highest].start_date", value: (p) => display(highest(p.education)?.start_date) },
   "入学时间": { path: "education[highest].start_date", value: (p) => display(highest(p.education)?.start_date) },
-  "学院名称": { path: "education[highest].school_name", value: (p) => highest(p.education)?.school_name },
+  "学院名称": { path: "education[highest].department", value: (p) => highest(p.education)?.department },
+  "学院": { path: "education[highest].department", value: (p) => highest(p.education)?.department },
+  "院系": { path: "education[highest].department", value: (p) => highest(p.education)?.department },
+  "院系名称": { path: "education[highest].department", value: (p) => highest(p.education)?.department },
 };
 
 const experienceAliases: Record<string, { path: string; value: (profile: CandidateProfile) => unknown }> = {
@@ -157,6 +167,40 @@ const projectAliases: Record<string, { path: string; value: (profile: CandidateP
   "结束日期": { path: "projects[latest].end_date", value: (p) => display(latestProject(p.projects)?.end_date) },
 };
 
+const awardAliases: Record<string, { path: string; value: (profile: CandidateProfile) => unknown }> = {
+  "获奖项": { path: "awards[latest].name", value: (p) => latestRecord(p.awards)?.name },
+  "奖项": { path: "awards[latest].name", value: (p) => latestRecord(p.awards)?.name },
+  "奖项名称": { path: "awards[latest].name", value: (p) => latestRecord(p.awards)?.name },
+  "获奖名称": { path: "awards[latest].name", value: (p) => latestRecord(p.awards)?.name },
+  "获奖描述": { path: "awards[latest].description", value: (p) => latestRecord(p.awards)?.description || latestRecord(p.awards)?.name },
+  "奖项描述": { path: "awards[latest].description", value: (p) => latestRecord(p.awards)?.description || latestRecord(p.awards)?.name },
+};
+
+const publicationAliases: Record<string, { path: string; value: (profile: CandidateProfile) => unknown }> = {
+  "论文题目": { path: "publications[latest].title", value: (p) => latestRecord(p.publications)?.title },
+  "论文名称": { path: "publications[latest].title", value: (p) => latestRecord(p.publications)?.title },
+  "论文": { path: "publications[latest].title", value: (p) => latestRecord(p.publications)?.title },
+  "专著名称": { path: "publications[latest].title", value: (p) => latestRecord(p.publications)?.title },
+  "论文描述": { path: "publications[latest].description", value: (p) => latestRecord(p.publications)?.description },
+  "发表刊物": { path: "publications[latest].venue", value: (p) => latestRecord(p.publications)?.venue },
+  "期刊名称": { path: "publications[latest].venue", value: (p) => latestRecord(p.publications)?.venue },
+  "论文作者": { path: "publications[latest].authors", value: (p) => latestRecord(p.publications)?.authors },
+  "名称": { path: "publications[latest].title", value: (p) => latestRecord(p.publications)?.title },
+  "成果描述": { path: "publications[latest].description", value: (p) => latestRecord(p.publications)?.description },
+};
+
+const certificateAliases: Record<string, { path: string; value: (profile: CandidateProfile) => unknown }> = {
+  "证书名称": { path: "certificates[latest].name", value: (p) => latestRecord(p.certificates)?.name },
+  "证书描述": { path: "certificates[latest].description", value: (p) => latestRecord(p.certificates)?.description },
+  "证书编号": { path: "certificates[latest].number", value: (p) => latestRecord(p.certificates)?.number },
+};
+
+const practiceAliases: Record<string, { path: string; value: (profile: CandidateProfile) => unknown }> = {
+  "实践名称": { path: "campus_practices[latest].name", value: (p) => latestRecord(p.campus_practices)?.name },
+  "实践描述": { path: "campus_practices[latest].description", value: (p) => latestRecord(p.campus_practices)?.description },
+  "实践内容": { path: "campus_practices[latest].description", value: (p) => latestRecord(p.campus_practices)?.description },
+};
+
 function display(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const date = value as { year?: number; month?: number; day?: number };
@@ -171,19 +215,36 @@ function highest(records: Array<Record<string, unknown>> | undefined) {
 }
 
 function latestExperience(records: Array<Record<string, unknown>> | undefined) {
+  return experienceRecords(records)[0];
+}
+
+function experienceRecords(records: Array<Record<string, unknown>> | undefined) {
   const internships = (records || []).filter((record) => {
     const type = String(record.experience_type || record.type || "").toLowerCase();
     return !type || type.includes("intern") || type.includes("实习");
   });
-  return [...(internships.length ? internships : records || [])].sort((a, b) => dateSortKey(b.end_date || b.start_date).localeCompare(dateSortKey(a.end_date || a.start_date)))[0];
+  return [...(internships.length ? internships : records || [])].sort((a, b) => dateSortKey(b.end_date || b.start_date).localeCompare(dateSortKey(a.end_date || a.start_date)));
+}
+
+function latestRecord(records: Array<Record<string, unknown>> | undefined) {
+  return recordRecords(records)[0];
+}
+
+function recordRecords(records: Array<Record<string, unknown>> | undefined) {
+  return [...(records || [])].sort((a, b) => dateSortKey(b.end_date || b.date || b.published_date || b.start_date || b.year).localeCompare(dateSortKey(a.end_date || a.date || a.published_date || a.start_date || a.year)));
+}
+
+function projectRecords(records: Array<Record<string, unknown>> | undefined) {
+  return [...(records || [])].sort((a, b) => dateSortKey(b.end_date || b.start_date).localeCompare(dateSortKey(a.end_date || a.start_date)));
 }
 
 function latestProject(records: Array<Record<string, unknown>> | undefined) {
-  return [...(records || [])].sort((a, b) => dateSortKey(b.end_date || b.start_date).localeCompare(dateSortKey(a.end_date || a.start_date)))[0];
+  return projectRecords(records)[0];
 }
 
 function dateSortKey(value: unknown) {
   if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
   if (value && typeof value === "object") {
     const date = value as { year?: number; month?: number; day?: number };
     if (date.year) return `${date.year}-${String(date.month || 0).padStart(2, "0")}-${String(date.day || 0).padStart(2, "0")}`;
@@ -196,11 +257,22 @@ function experienceDescription(records: Array<Record<string, unknown>> | undefin
   return Array.isArray(bullets) ? bullets.filter((bullet): bullet is string => typeof bullet === "string").join("\n") : undefined;
 }
 
+function experienceDescriptionAt(record: Record<string, unknown> | undefined) {
+  const bullets = record?.description_bullets;
+  return Array.isArray(bullets) ? bullets.filter((bullet): bullet is string => typeof bullet === "string").join("\n") : undefined;
+}
+
 function projectDescription(records: Array<Record<string, unknown>> | undefined) {
   const project = latestProject(records);
   if (!project) return undefined;
   if (Array.isArray(project.description_bullets)) return project.description_bullets.filter((bullet): bullet is string => typeof bullet === "string").join("\n");
   return project.summary;
+}
+
+function projectDescriptionAt(record: Record<string, unknown> | undefined) {
+  if (!record) return undefined;
+  if (Array.isArray(record.description_bullets)) return record.description_bullets.filter((bullet): bullet is string => typeof bullet === "string").join("\n");
+  return record.summary;
 }
 
 function weight(value: unknown) {
@@ -213,7 +285,7 @@ function weight(value: unknown) {
 }
 
 function normalize(value: string) {
-  return value.replace(/[\s:*：\/／,，.。·()（）【】\[\]必选填项_-]/g, "").toLowerCase();
+  return value.replace(/[\s:*：\/／,，.。·()（）【】\[\]_-]/g, "").replace(/必选填项|必填|选填/g, "").toLowerCase();
 }
 
 function findKey(field: PageField, rules: Record<string, unknown>) {
@@ -221,37 +293,106 @@ function findKey(field: PageField, rules: Record<string, unknown>) {
   return Object.keys(rules).find((key) => value === normalize(key) || value.includes(normalize(key))) || "";
 }
 
-function fieldRule(field: PageField, section?: string) {
-  if (section === "实习经历") {
+function fieldRule(field: PageField, section?: string): { rule: { path: string; value: (profile: CandidateProfile) => unknown }; source: MappingSource } | undefined {
+  const scope = field.section || section;
+  if (scope === "实习经历") {
     const key = findKey(field, experienceAliases);
-    if (key) return experienceAliases[key];
+    if (key) return { rule: experienceAliases[key], source: "experience" };
   }
-  if (section === "项目经历") {
+  if (scope === "项目经历") {
     const key = findKey(field, projectAliases);
-    if (key) return projectAliases[key];
+    if (key) return { rule: projectAliases[key], source: "project" };
+  }
+  if (scope === "获奖情况") {
+    const key = findKey(field, awardAliases);
+    if (key) return { rule: awardAliases[key], source: "award" };
+  }
+  if (scope === "论文/专著") {
+    const key = findKey(field, publicationAliases);
+    if (key) return { rule: publicationAliases[key], source: "publication" };
+  }
+  if (scope === "证书") {
+    const key = findKey(field, certificateAliases);
+    if (key) return { rule: certificateAliases[key], source: "certificate" };
+  }
+  if (scope === "在校实践") {
+    const key = findKey(field, practiceAliases);
+    if (key) return { rule: practiceAliases[key], source: "practice" };
   }
   const baseKey = findKey(field, aliases);
-  if (baseKey) return aliases[baseKey];
+  if (baseKey) return { rule: aliases[baseKey], source: "base" };
   const experienceKey = findKey(field, experienceAliases);
-  if (experienceKey && !["开始时间", "结束时间"].includes(experienceKey)) return experienceAliases[experienceKey];
+  if (experienceKey && !["开始时间", "结束时间", "开始日期", "结束日期"].includes(experienceKey)) return { rule: experienceAliases[experienceKey], source: "experience" };
   const projectKey = findKey(field, projectAliases);
-  if (projectKey) return projectAliases[projectKey];
+  if (projectKey) return { rule: projectAliases[projectKey], source: "project" };
+  const awardKey = findKey(field, awardAliases);
+  if (awardKey) return { rule: awardAliases[awardKey], source: "award" };
+  const publicationKey = findKey(field, publicationAliases);
+  if (publicationKey && !["名称", "成果描述"].includes(publicationKey)) return { rule: publicationAliases[publicationKey], source: "publication" };
+  const certificateKey = findKey(field, certificateAliases);
+  if (certificateKey) return { rule: certificateAliases[certificateKey], source: "certificate" };
+  const practiceKey = findKey(field, practiceAliases);
+  if (practiceKey) return { rule: practiceAliases[practiceKey], source: "practice" };
   return undefined;
 }
 
+function valueForRecord(rule: { path: string }, profile: CandidateProfile, source: MappingSource, index: number) {
+  const recordMatch = rule.path.match(/^(?:experiences|projects|awards|publications|certificates|campus_practices)\[latest\]\.(.+)$/);
+  if (!recordMatch) return rule.path.includes("education[highest]") ? undefined : undefined;
+  const key = recordMatch[1];
+  const records = source === "experience" ? experienceRecords(profile.experiences) : source === "project" ? projectRecords(profile.projects) : recordRecords(source === "award" ? profile.awards : source === "publication" ? profile.publications : source === "certificate" ? profile.certificates : profile.campus_practices);
+  const record = records[index];
+  if (source === "experience" && key === "description_bullets") return experienceDescriptionAt(record);
+  if (source === "project" && key === "description_bullets") return projectDescriptionAt(record);
+  return record?.[key];
+}
+
+function pathForIndex(path: string, source: MappingSource, index: number | undefined) {
+  if (index === undefined || source === "base") return path;
+  return path.replace("[latest]", `[${index}]`);
+}
+
 export function mapFields(fields: PageField[], profile?: CandidateProfile, section?: string): FieldPlan[] {
+  const occurrences: Record<string, number> = {};
+  const experienceSlotIndices: number[] = [];
+  const usedExperienceIndices = new Set<number>();
+  if (profile) {
+    fields.forEach((field) => {
+      if (!field.value.trim()) return;
+      const selected = fieldRule(field, section);
+      if (!selected || selected.source !== "experience" || !/\.(org_name|title)$/.test(selected.rule.path)) return;
+      const wanted = field.value.trim().toLowerCase();
+      const index = experienceRecords(profile.experiences).findIndex((record) => [record.org_name, record.title].some((value) => String(value || "").trim().toLowerCase() === wanted));
+      if (index >= 0) usedExperienceIndices.add(index);
+    });
+  }
+  const recordIndexFor = (source: MappingSource, slot: number) => {
+    if (source !== "experience") return slot;
+    if (experienceSlotIndices[slot] !== undefined) return experienceSlotIndices[slot];
+    const records = experienceRecords(profile?.experiences);
+    const used = new Set([...usedExperienceIndices, ...experienceSlotIndices.filter((index): index is number => index !== undefined)]);
+    const available = records.findIndex((_record, index) => !used.has(index));
+    experienceSlotIndices[slot] = available >= 0 ? available : records.length;
+    return experienceSlotIndices[slot];
+  };
   return fields.map((field) => {
     if (field.value.trim()) return { field, decision: "skip", reason: "已有内容，已保留" };
+    if (!field.required) return { field, decision: "skip", reason: "选填项，按要求留空" };
     if (!profile) return { field, decision: "review", reason: "请先导入候选人资料" };
-    const rule = fieldRule(field, section);
-    if (!rule) return { field, decision: "review", reason: "没有唯一的字段规则，请手动选择资料" };
-    const value = rule.value(profile);
-    if (value === undefined || value === null || String(value).trim() === "") return { field, decision: "review", profilePath: rule.path, reason: `资料缺少：${rule.path}` };
-    if (field.kind === "choice") return { field, decision: "review", profilePath: rule.path, proposedValue: String(value), reason: "选择控件需要确认具体选项" };
-    if (field.kind === "file") return { field, decision: "review", profilePath: rule.path, proposedValue: String(value), reason: "附件需要在浏览器中选择文件" };
-    const proposedValue = formatValue(rule.path, value);
-    if (field.type === "date" && /^\d{4}-\d{2}$/.test(proposedValue)) return { field, decision: "review", profilePath: rule.path, proposedValue, reason: "资料只有年月，日期控件需要完整日期" };
-    return { field, decision: "fill", profilePath: rule.path, proposedValue, reason: `来源：${rule.path}` };
+    const selected = fieldRule(field, section);
+    if (!selected) return { field, decision: "review", reason: "没有唯一的字段规则，请手动选择资料" };
+    const slotKey = selected.source === "base" ? "" : `${selected.source}:${selected.rule.path.match(/\.(\w+)$/)?.[1] || selected.rule.path}`;
+    const index = slotKey ? occurrences[slotKey] || 0 : undefined;
+    if (slotKey) occurrences[slotKey] = (index || 0) + 1;
+    const recordIndex = index === undefined ? undefined : recordIndexFor(selected.source, index);
+    const profilePath = pathForIndex(selected.rule.path, selected.source, recordIndex);
+    const value = recordIndex === undefined ? selected.rule.value(profile) : valueForRecord(selected.rule, profile, selected.source, recordIndex);
+    if (value === undefined || value === null || String(value).trim() === "") return { field, decision: "review", profilePath, reason: `资料缺少：${profilePath}` };
+    if (field.kind === "choice") return { field, decision: "review", profilePath, proposedValue: String(value), reason: "选择控件需要确认具体选项" };
+    if (field.kind === "file") return { field, decision: "review", profilePath, proposedValue: String(value), reason: "附件需要在浏览器中选择文件" };
+    const proposedValue = formatValue(profilePath, value);
+    if (field.type === "date" && /^\d{4}-\d{2}$/.test(proposedValue)) return { field, decision: "review", profilePath, proposedValue, reason: "资料只有年月，日期控件需要完整日期" };
+    return { field, decision: "fill", profilePath, proposedValue, reason: `来源：${profilePath}` };
   });
 }
 

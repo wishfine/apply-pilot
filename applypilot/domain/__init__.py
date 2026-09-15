@@ -11,7 +11,10 @@ from applypilot.domain.base import (
 from applypilot.domain.job import ApplicationStatus, ApplicationTarget, Job
 from applypilot.domain.profile import (
     AssetRecord,
+    AwardRecord,
+    CampusPracticeRecord,
     CandidateProfile,
+    CertificateRecord,
     ChinaCampusContext,
     ContactInfo,
     EducationLevel,
@@ -21,6 +24,7 @@ from applypilot.domain.profile import (
     FamilyMember,
     IdentityInfo,
     ProjectRecord,
+    PublicationRecord,
     SkillRecord,
     SOEExtendedInfo,
     StoryRecord,
@@ -37,7 +41,10 @@ __all__ = [
     "ApplicationTarget",
 
     "AssetRecord",
+    "AwardRecord",
+    "CampusPracticeRecord",
     "CandidateProfile",
+    "CertificateRecord",
     "ChinaCampusContext",
     "ContactInfo",
     "DisclosurePolicy",
@@ -53,6 +60,7 @@ __all__ = [
     "LogStrategy",
     "PartialDate",
     "ProjectRecord",
+    "PublicationRecord",
     "ResumeVariant",
     "SensitivityLevel",
     "SkillRecord",

@@ -16,17 +16,22 @@ identity:
   pinyin_first_name: "San"
   pinyin_last_name: "Zhang"
   english_name: "San Zhang"
+  nationality: "中国"
   birth_date: "2001-05-15"             # 支持 YYYY-MM-DD 或 YYYY-MM
   id_type: "身份证"                     # 身份证 / 护照 / 港澳台通行证
   id_number: "110101200105152345"      # 仅保存在本地，默认不上传大模型
   ethnicity: "汉族"                    # 少数民族请准确填写全称，如：维吾尔族、满族
   health_status: "良好"                 # 健康 / 良好
+  marital_status: null
 
 # 2. 联系方式与常住地 (Contact)
 contact:
   mobile: "13800138000"
   email: "zhangsan@example.com"
   current_city: "北京市"                # 常住城市（系统会自动避免误填为“期望工作城市”）
+  current_address: null
+  qq: null
+  wechat: null
   emergency_contact_name: "张父"
   emergency_contact_phone: "13900139000"
 
@@ -64,7 +69,27 @@ education:
     is_highest_degree: "no"
     thesis_title: "基于图神经网络的知识图谱实体对齐技术"
 
-# 4. 实习与工作经历 (Experiences)
+# 5. 奖项与论文/专著（只填写简历中明确出现的事实）
+awards:
+  - id: "award_example"
+    name: "一等学业奖学金"
+    date: "2025-2026"
+    issuer: "清华大学"
+    description: null
+
+publications:
+  - id: "pub_example"
+    title: "论文题目"
+    venue: "会议或期刊名称"
+    authors: null
+    date: "2026"
+    status: "已录用 / 在投"
+    description: null
+
+certificates: []
+campus_practices: []
+
+# 6. 实习与工作经历 (Experiences)
 experiences:
   - id: "exp_bytedance_intern"
     experience_type: "internship"       # internship / full_time / research / student_org / volunteer
@@ -91,7 +116,7 @@ experiences:
       - "负责内部微服务 RPC 框架监控中间件的指标聚合设计，日均处理日志数据量逾 500GB。"
     skills_used_ids: ["skill_cpp", "skill_linux"]
 
-# 5. 项目经历 (Projects)
+# 7. 项目经历 (Projects)
 projects:
   - id: "proj_apply_pilot"
     project_name: "ApplyPilot 自动化网申 Agent"
@@ -105,7 +130,7 @@ projects:
     technologies_used_ids: ["skill_python", "skill_playwright"]
     repo_url: "https://github.com/wishfine/apply-pilot"
 
-# 6. 专业技能 (Skills)
+# 8. 专业技能 (Skills)
 skills:
   - skill_id: "skill_python"
     name: "Python"
@@ -125,7 +150,7 @@ skills:
     proficiency: "熟练"
     years_experience: 2.0
 
-# 7. 中国校招专属事实 (Campus Context)
+# 9. 中国校招专属事实 (Campus Context)
 campus_context:
   graduation_year: 2026
   graduation_month: 6
@@ -134,7 +159,7 @@ campus_context:
   cet6_score: 550
   has_dispatch_qualification: "yes"     # 派遣证/报到证资格: yes / no / unknown
 
-# 8. 国央企/体制内特色背景扩展 (SOE Extended Info)
+# 10. 国央企/体制内特色背景扩展 (SOE Extended Info)
 # 国央企、事业单位、金融银行网申特有调查问卷
 soe_extended:
   political_status: "中共党员"           # 群众 / 共青团员 / 中共预备党员 / 中共党员

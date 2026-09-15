@@ -113,9 +113,13 @@ class ResumeIngestionService:
             "3. If an optional field (such as ethnicity, political_status, health_status, GPA, test scores) "
             "is not explicitly mentioned, leave it null or omit it.\n"
             "4. Dates must be formatted as strings 'YYYY-MM-DD', 'YYYY-MM', or objects {'year': int, 'month': int, 'day': int}.\n"
-            "5. Generate stable semantic IDs for education ('edu_bachelor', 'edu_master'), experiences ('exp_1'), "
-            "and projects ('proj_1').\n"
-            "6. Output must be a single valid JSON object."
+            "5. Preserve every explicitly stated education, internship/work experience, project, award/scholarship, "
+            "publication/thesis, certificate, campus practice, and skill as separate records; do not collapse repeated records.\n"
+            "6. Generate stable semantic IDs for education ('edu_bachelor', 'edu_master'), experiences ('exp_1'), "
+            "projects ('proj_1'), awards ('award_1'), publications ('pub_1'), certificates ('cert_1'), and campus practices ('practice_1').\n"
+            "7. Keep status and qualifiers such as accepted, under review, CCF/JCR level, scholarship year, and award date "
+            "in the corresponding record instead of dropping them.\n"
+            "8. Output must be a single valid JSON object."
         )
 
         user_prompt = (
@@ -130,6 +134,8 @@ class ResumeIngestionService:
             f'  "identity": {{\n'
             f'    "name": "...",\n'
             f'    "gender": "male" | "female" | null,\n'
+            f'    "english_name": "..." | null,\n'
+            f'    "nationality": "..." | null,\n'
             f'    "birth_date": "YYYY-MM-DD" | null,\n'
             f'    "ethnicity": null,\n'
             f'    "health_status": null\n'
@@ -137,7 +143,10 @@ class ResumeIngestionService:
             f'  "contact": {{\n'
             f'    "mobile": "...",\n'
             f'    "email": "...",\n'
-            f'    "current_city": "..."\n'
+            f'    "current_city": "...",\n'
+            f'    "current_address": "..." | null,\n'
+            f'    "qq": "..." | null,\n'
+            f'    "wechat": "..." | null\n'
             f'  }},\n'
             f'  "education": [\n'
             f'    {{\n'
@@ -170,6 +179,18 @@ class ResumeIngestionService:
             f'      "end_date": "YYYY-MM",\n'
             f'      "description_bullets": ["..."]\n'
             f'    }}\n'
+            f'  ],\n'
+            f'  "awards": [\n'
+            f'    {{ "id": "award_1", "name": "...", "date": "YYYY or YYYY-YYYY" | null, "issuer": "..." | null, "description": "..." | null }}\n'
+            f'  ],\n'
+            f'  "publications": [\n'
+            f'    {{ "id": "pub_1", "title": "..." | null, "venue": "..." | null, "authors": "..." | ["..."] | null, "date": "YYYY or YYYY-MM" | null, "status": "..." | null, "description": "..." | null }}\n'
+            f'  ],\n'
+            f'  "certificates": [\n'
+            f'    {{ "id": "cert_1", "name": "...", "number": "..." | null, "date": "..." | null, "description": "..." | null }}\n'
+            f'  ],\n'
+            f'  "campus_practices": [\n'
+            f'    {{ "id": "practice_1", "name": "...", "role": "..." | null, "start_date": "YYYY-MM" | null, "end_date": "YYYY-MM" | null, "description": "..." | null }}\n'
             f'  ],\n'
             f'  "skills": [\n'
             f'    {{\n'
@@ -262,6 +283,29 @@ class ResumeIngestionService:
                 continue
             if "id" not in edu or not edu["id"]:
                 edu["id"] = f"edu_{idx + 1}"
+
+        for key, prefix in {
+            "awards": "award",
+            "publications": "pub",
+            "certificates": "cert",
+            "campus_practices": "practice",
+        }.items():
+            for idx, record in enumerate(profile_dict.get(key, [])):
+                if not isinstance(record, dict):
+                    continue
+                if "id" not in record or not record["id"]:
+                    record["id"] = f"{prefix}_{idx + 1}"
+
+        for publication in profile_dict.get("publications", []):
+            if not isinstance(publication, dict):
+                continue
+            if "title" not in publication and "name" in publication:
+                publication["title"] = publication.pop("name")
+        for award in profile_dict.get("awards", []):
+            if not isinstance(award, dict):
+                continue
+            if "name" not in award and "award_name" in award:
+                award["name"] = award.pop("award_name")
 
         # Derive the identifier only after aliases and generated record IDs
         # have been normalized.  Equivalent model outputs (for example

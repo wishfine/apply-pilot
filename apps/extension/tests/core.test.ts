@@ -18,6 +18,10 @@ function field(label: string, value = ""): PageField {
   return { ref: `ref-${label}`, label, name: label, kind: "text", required: true, value, options: [] };
 }
 
+function optionalField(label: string): PageField {
+  return { ...field(label), required: false };
+}
+
 describe("extension field planning", () => {
   it("maps Chinese labels and chooses the highest education record", () => {
     const plan = mapFields([field("姓名"), field("手机号码"), field("毕业院校"), field("专业")], profile);
@@ -33,9 +37,9 @@ describe("extension field planning", () => {
   });
 
   it("maps abbreviated education and internship labels even when one page contains several sections", () => {
-    const detailedProfile = { ...profile, identity: { ...profile.identity, id_number: "110101200001010011" }, education: [{ id: "edu", school_name: "北京大学", education_level: "master", major: "计算机" , start_date: "2023-09", end_date: "2026-06" }], experiences: [{ id: "exp", experience_type: "internship", org_name: "字节跳动", title: "算法实习生", start_date: "2025-06", end_date: "2025-09" }] };
+    const detailedProfile = { ...profile, identity: { ...profile.identity, id_number: "110101200001010011" }, education: [{ id: "edu", school_name: "北京大学", department: "计算机学院", education_level: "master", major: "计算机" , start_date: "2023-09", end_date: "2026-06" }], experiences: [{ id: "exp", experience_type: "internship", org_name: "字节跳动", title: "算法实习生", start_date: "2025-06", end_date: "2025-09" }] };
     const plan = mapFields([field("身份证"), field("学院名称"), field("结束时间"), field("单位名称"), field("职位名称")], detailedProfile);
-    expect(plan.map((item) => item.proposedValue)).toEqual(["110101200001010011", "北京大学", "2026-06", "字节跳动", "算法实习生"]);
+    expect(plan.map((item) => item.proposedValue)).toEqual(["110101200001010011", "计算机学院", "2026-06", "字节跳动", "算法实习生"]);
     expect(plan.every((item) => item.decision === "fill")).toBe(true);
   });
 
@@ -52,6 +56,10 @@ describe("extension field planning", () => {
     expect(plan[1]).toMatchObject({ decision: "review" });
   });
 
+  it("leaves empty optional fields untouched", () => {
+    expect(mapFields([optionalField("姓名")], profile)[0]).toMatchObject({ decision: "skip", reason: "选填项，按要求留空" });
+  });
+
   it("does not guess radio or checkbox state", () => {
     const choice = { ...field("性别"), kind: "choice" };
     expect(mapFields([choice], profile)[0]).toMatchObject({ decision: "review", reason: "选择控件需要确认具体选项" });
@@ -62,6 +70,35 @@ describe("extension field planning", () => {
     const plan = mapFields([field("公司名称"), field("职位"), field("工作内容")], experienceProfile, "实习经历");
     expect(plan.map((item) => item.proposedValue)).toEqual(["新东方教育科技集团", "AI 算法实习生", "算法建模"]);
     expect(plan.every((item) => item.decision === "fill")).toBe(true);
+  });
+
+  it("assigns successive blank internship rows to successive profile records", () => {
+    const experienceProfile = { ...profile, experiences: [{ id: "new", experience_type: "internship", org_name: "新东方", title: "AI 算法实习生", start_date: "2026-05", end_date: "2026-09", description_bullets: ["新经历"] }, { id: "old", experience_type: "internship", org_name: "高德地图", title: "应用算法实习生", start_date: "2025-10", end_date: "2026-02", description_bullets: ["旧经历"] }] };
+    const plan = mapFields([field("单位名称"), field("职位名称"), field("实习内容"), field("单位名称"), field("职位名称"), field("实习内容")], experienceProfile, "个人信息");
+    expect(plan.map((item) => item.proposedValue)).toEqual(["新东方", "AI 算法实习生", "新经历", "高德地图", "应用算法实习生", "旧经历"]);
+    expect(plan.map((item) => item.profilePath)).toEqual(["experiences[0].org_name", "experiences[0].title", "experiences[0].description_bullets", "experiences[1].org_name", "experiences[1].title", "experiences[1].description_bullets"]);
+  });
+
+  it("does not repeat an internship already present in an existing row", () => {
+    const experienceProfile = { ...profile, experiences: [{ id: "new", experience_type: "internship", org_name: "新东方", title: "AI 算法实习生", start_date: "2026-05", end_date: "2026-09" }, { id: "old", experience_type: "internship", org_name: "高德地图", title: "应用算法实习生", start_date: "2025-10", end_date: "2026-02" }] };
+    const plan = mapFields([field("单位名称", "新东方"), field("职位名称", "AI 算法实习生"), field("单位名称"), field("职位名称")], experienceProfile, "个人信息");
+    expect(plan.slice(2).map((item) => item.proposedValue)).toEqual(["高德地图", "应用算法实习生"]);
+    expect(plan[2].profilePath).toBe("experiences[1].org_name");
+  });
+
+  it("leaves a new internship row for manual entry when every profile record is already used", () => {
+    const experienceProfile = { ...profile, experiences: [{ id: "new", experience_type: "internship", org_name: "新东方", title: "AI 算法实习生", start_date: "2026-05", end_date: "2026-09" }] };
+    const plan = mapFields([field("单位名称", "新东方"), field("单位名称")], experienceProfile, "个人信息");
+    expect(plan[1]).toMatchObject({ decision: "review", profilePath: "experiences[1].org_name" });
+  });
+
+  it("maps awards and publication fields from structured profile arrays", () => {
+    const structuredProfile = { ...profile, awards: [{ id: "a1", name: "一等学业奖学金", date: "2025-2026", description: "硕士阶段" }, { id: "a2", name: "国家励志奖学金", date: "2022-2024" }], publications: [{ id: "p1", title: "NAS 2026", venue: "CCF-C", status: "已录用", description: "NAS 2026（CCF-C，已录用）" }] };
+    const awards = mapFields([field("获奖项"), field("获奖描述")], structuredProfile, "获奖情况");
+    const publications = mapFields([field("名称"), field("成果描述"), field("发表刊物")], structuredProfile, "论文/专著");
+    expect(awards.map((item) => item.proposedValue)).toEqual(["一等学业奖学金", "硕士阶段"]);
+    expect(publications.map((item) => item.proposedValue)).toEqual(["NAS 2026", "NAS 2026（CCF-C，已录用）", "CCF-C"]);
+    expect([...awards, ...publications].every((item) => item.decision === "fill")).toBe(true);
   });
 
   it("rejects malformed profile data before writing it to storage", () => {
