@@ -12,6 +12,7 @@ export type PageField = {
 
 export type PageScan = { url: string; title: string; fields: PageField[]; documentReady: boolean; pageState: "form" | "login" | "loading" | "empty"; embeddedFrameCount: number };
 export type FillReceipt = { ok: boolean; message: string; value?: string };
+export type FilePayload = { name: string; type: string; bytes: number[] };
 
 /** This function is self-contained because Chrome serializes it for injection. */
 export function scanPage(): PageScan {
@@ -39,14 +40,16 @@ export function scanPage(): PageScan {
   for (const element of Array.from(new Set(candidates))) {
     const control = element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
     const type = String((control as HTMLInputElement).type || element.getAttribute("role") || "text").toLowerCase();
-    if (!visible(element) || (control as HTMLInputElement).disabled || element.getAttribute("aria-disabled") === "true") continue;
+    const uploadHost = type === "file" ? element.closest("label, [role='button'], [class*='upload'], [class*='Upload']") : null;
+    const inspectable = visible(element) || (type === "file" && uploadHost !== null && visible(uploadHost));
+    if (!inspectable || (control as HTMLInputElement).disabled || element.getAttribute("aria-disabled") === "true") continue;
     if (["hidden", "password", "search"].includes(type)) continue;
     const hint = clean(element.getAttribute("aria-label") || element.getAttribute("placeholder") || element.getAttribute("name") || element.id);
     const ownerRoot = element.getRootNode() as Document | ShadowRoot;
     const associated = element.id ? ownerRoot.querySelector(`label[for="${CSS.escape(element.id)}"]`) : null;
     const container = element.closest("label, .form-item, .form-group, .field, [class*='field'], [class*='form']");
     const nearby = container?.querySelector("label, legend, .label, [class*='label']");
-    const label = clean(associated?.textContent || nearby?.textContent || hint);
+    const label = clean(associated?.textContent || nearby?.textContent || hint || uploadHost?.textContent || (type === "file" ? "附件上传" : ""));
     if (!label) continue;
     let kind: PageField["kind"] = "unsupported";
     if (element instanceof HTMLSelectElement) kind = "select";
@@ -136,4 +139,64 @@ export function fillField(ref: string, value: string): FillReceipt {
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "控件拒绝了写入" };
   }
+}
+
+/** Transfers one bounded chunk of a user-authorized local file. */
+export function fillFileChunk(ref: string, name: string, type: string, bytes: number[], done: boolean, totalBytes: number): FillReceipt {
+  const findInRoot = (root: ParentNode): Element | null => {
+    const direct = root.querySelector(`[data-applypilot-ref="${CSS.escape(ref)}"]`);
+    if (direct) return direct;
+    for (const host of Array.from(root.querySelectorAll("*"))) {
+      if (host.shadowRoot) {
+        const nested = findInRoot(host.shadowRoot);
+        if (nested) return nested;
+      }
+    }
+    return null;
+  };
+  const element = findInRoot(document);
+  if (!(element instanceof HTMLInputElement) || element.type !== "file") return { ok: false, message: "没有找到可用的附件上传控件，请手动上传" };
+  try {
+    const holder = element as HTMLInputElement & { __applypilotFileBuffer?: { name: string; type: string; totalBytes: number; bytes: number[] } };
+    const buffer = holder.__applypilotFileBuffer || { name, type: type || "application/octet-stream", totalBytes, bytes: [] };
+    if (buffer.name !== name || buffer.type !== (type || "application/octet-stream")) buffer.bytes = [];
+    buffer.name = name;
+    buffer.type = type || "application/octet-stream";
+    buffer.totalBytes = totalBytes;
+    buffer.bytes.push(...bytes);
+    holder.__applypilotFileBuffer = buffer;
+    if (!done) return { ok: true, message: "附件传输中" };
+    if (buffer.bytes.length !== totalBytes) {
+      delete holder.__applypilotFileBuffer;
+      return { ok: false, message: "附件传输不完整，请重新选择文件" };
+    }
+    const file = new File([new Uint8Array(buffer.bytes)], buffer.name, { type: buffer.type });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    element.files = transfer.files;
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    const selected = element.files?.[0];
+    delete holder.__applypilotFileBuffer;
+    if (!selected || selected.name !== name || selected.size !== buffer.bytes.length) return { ok: false, message: "浏览器未接受附件，请在页面中手动选择" };
+    return { ok: true, value: selected.name, message: "已选择附件并触发网站上传，请等待页面确认上传完成" };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "附件选择失败，请手动上传" };
+  }
+}
+
+export function clearFileBuffer(ref: string): void {
+  const findInRoot = (root: ParentNode): Element | null => {
+    const direct = root.querySelector(`[data-applypilot-ref="${CSS.escape(ref)}"]`);
+    if (direct) return direct;
+    for (const host of Array.from(root.querySelectorAll("*"))) {
+      if (host.shadowRoot) {
+        const nested = findInRoot(host.shadowRoot);
+        if (nested) return nested;
+      }
+    }
+    return null;
+  };
+  const element = findInRoot(document) as (HTMLInputElement & { __applypilotFileBuffer?: unknown }) | null;
+  if (element) delete element.__applypilotFileBuffer;
 }

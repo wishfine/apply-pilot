@@ -40,4 +40,10 @@ describe("page runtime", () => {
     expect(receipt).toMatchObject({ ok: true, value: "张三" });
     expect(shadow.querySelector<HTMLInputElement>("input")?.value).toBe("张三");
   });
+
+  it("keeps a hidden file input when its visible upload drop zone is labeled", () => {
+    document.body.innerHTML = `<label>上传简历<input type="file" style="display:none"></label>`;
+    const result = scanPage();
+    expect(result.fields).toMatchObject([{ kind: "file", label: "上传简历" }]);
+  });
 });

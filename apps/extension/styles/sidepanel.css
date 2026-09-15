@@ -20,6 +20,7 @@ input[type=file] { max-width: 100%; font-size: 12px; }
 .unlock-row { display: flex; gap: 6px; margin-bottom: 8px; }
 .unlock-row input { min-width: 0; flex: 1; padding: 8px; border: 1px solid #dfe4ef; border-radius: 7px; font-size: 12px; }
 .small-button { padding: 8px 9px; color: #33406b; background: #edf0f7; font-size: 12px; }
+.attachment-help { margin: 10px 0 5px; }
 .summary { min-height: 32px; color: #3e4b6a; font-size: 12px; }
 .notice { margin: 0 0 10px; padding: 9px; color: #72551b; background: #fff8e4; border-radius: 7px; font-size: 12px; line-height: 1.5; }
 .field-list { display: grid; gap: 7px; padding: 0; margin: 10px 0 0; list-style: none; }

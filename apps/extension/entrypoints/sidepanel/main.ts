@@ -1,7 +1,7 @@
 import { parse as parseYaml } from "yaml";
 import { mapFields, parseCandidateProfile, type CandidateProfile, type FieldPlan } from "../../../../packages/core/src/index";
 import { OperationStore, ProfileStore } from "../../../../packages/storage/src/index";
-import { fillField, scanPage, type FillReceipt, type PageScan } from "../../runtime/page";
+import { clearFileBuffer, fillField, fillFileChunk, scanPage, type FilePayload, type FillReceipt, type PageScan } from "../../runtime/page";
 import "../../styles/sidepanel.css";
 
 const store = new ProfileStore();
@@ -9,7 +9,7 @@ const rootElement = document.querySelector<HTMLDivElement>("#app");
 if (!rootElement) throw new Error("ApplyPilot sidepanel root is missing");
 const root = rootElement;
 
-type UiState = { activeTab?: chrome.tabs.Tab; scan?: PageScan; runId?: string; plan: FieldPlan[]; receipts: Record<string, FillReceipt>; profile?: CandidateProfile; error?: string; warning?: string; busy: boolean };
+type UiState = { activeTab?: chrome.tabs.Tab; scan?: PageScan; runId?: string; plan: FieldPlan[]; receipts: Record<string, FillReceipt>; profile?: CandidateProfile; asset?: FilePayload; error?: string; warning?: string; busy: boolean };
 const state: UiState = { plan: [], receipts: {}, busy: false };
 const operations = new OperationStore();
 
@@ -28,10 +28,40 @@ async function activeTab(): Promise<chrome.tabs.Tab> {
   return tab;
 }
 
+async function ensureSiteAccess(tab: chrome.tabs.Tab): Promise<void> {
+  if (!tab.url) throw new Error("当前标签页没有可用地址");
+  const origin = new URL(tab.url).origin;
+  try {
+    if (await chrome.permissions.contains({ origins: [`${origin}/*`] })) return;
+    const granted = await chrome.permissions.request({ origins: [`${origin}/*`] });
+    if (!granted) throw new Error(`未获得 ${origin} 的访问权限，请允许后再次点击扫描当前页`);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("未获得")) throw error;
+    throw new Error(`无法访问当前网站（${origin}）。请在扩展权限中允许此网站后重试`);
+  }
+}
+
+function buildPlan(fields: PageScan["fields"]): FieldPlan[] {
+  const plan = mapFields(fields, state.profile);
+  if (!state.asset) return plan;
+  const fileFields = fields.filter((field) => field.kind === "file");
+  for (const item of plan) {
+    if (item.field.kind !== "file") continue;
+    const text = `${item.field.label} ${item.field.name}`;
+    if (fileFields.length === 1 || /简历|resume|cv/i.test(text)) {
+      item.decision = "fill";
+      item.proposedValue = state.asset.name;
+      item.reason = `附件：${state.asset.name}`;
+    }
+  }
+  return plan;
+}
+
 async function scan() {
   state.busy = true; state.error = undefined; state.warning = undefined; render();
   try {
     const tab = await activeTab();
+    await ensureSiteAccess(tab);
     let results: chrome.scripting.InjectionResult<PageScan>[];
     try {
       results = await chrome.scripting.executeScript({ target: { tabId: tab.id!, allFrames: true }, func: scanPage });
@@ -45,7 +75,7 @@ async function scan() {
     state.scan = { url: first.url, title: first.title, pageState: first.pageState, documentReady: frames.every((item) => item.scan.documentReady), embeddedFrameCount: first.embeddedFrameCount, fields: frames.flatMap((item) => item.scan.fields.map((field) => ({ ...field, frameId: item.frameId }))) };
     if (first.embeddedFrameCount > frames.length - 1) state.warning = "部分内嵌表单没有访问权限，已只扫描当前可访问的页面。";
     state.runId = crypto.randomUUID();
-    state.plan = mapFields(state.scan.fields, state.profile);
+    state.plan = buildPlan(state.scan.fields);
     state.receipts = {};
   } catch (error) { state.error = error instanceof Error ? error.message : "扫描页面失败"; }
   finally { state.busy = false; render(); }
@@ -67,8 +97,30 @@ async function fill() {
       if (value === undefined) continue;
       const operationId = await operations.prepare(state.runId || "untracked", receiptKey);
       try {
-        const results = await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, frameIds: [item.field.frameId ?? 0] }, func: fillField, args: [item.field.ref, value] });
-        state.receipts[receiptKey] = results[0]?.result as FillReceipt || { ok: false, message: "页面没有返回填写结果" };
+        if (item.field.kind === "file") {
+          if (!state.asset) {
+            state.receipts[receiptKey] = { ok: false, message: "请先在侧栏选择简历附件" };
+            await operations.finish(operationId, "failed", "ASSET_NOT_SELECTED");
+            continue;
+          }
+          const chunkSize = 512 * 1024;
+          let receipt: FillReceipt | undefined;
+          try {
+            for (let offset = 0; offset < state.asset.bytes.length; offset += chunkSize) {
+              const chunk = state.asset.bytes.slice(offset, offset + chunkSize);
+              const done = offset + chunk.length >= state.asset.bytes.length;
+              const results = await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, frameIds: [item.field.frameId ?? 0] }, func: fillFileChunk, args: [item.field.ref, state.asset.name, state.asset.type, chunk, done, state.asset.bytes.length] });
+              if (done) receipt = results[0]?.result as FillReceipt | undefined;
+            }
+          } catch (error) {
+            await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, frameIds: [item.field.frameId ?? 0] }, func: clearFileBuffer, args: [item.field.ref] }).catch(() => undefined);
+            throw error;
+          }
+          state.receipts[receiptKey] = receipt || { ok: false, message: "页面没有返回附件结果" };
+        } else {
+          const results = await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, frameIds: [item.field.frameId ?? 0] }, func: fillField, args: [item.field.ref, value] });
+          state.receipts[receiptKey] = results[0]?.result as FillReceipt || { ok: false, message: "页面没有返回填写结果" };
+        }
         await operations.finish(operationId, state.receipts[receiptKey].ok ? "verified" : "failed");
       } catch (error) {
         await operations.finish(operationId, "unknown", "EXECUTION_ERROR");
@@ -91,8 +143,22 @@ async function importProfile(file: File) {
   const profile = parseCandidateProfile(parsed);
   await store.save(profile);
   state.profile = profile;
-  if (state.scan) state.plan = mapFields(state.scan.fields, profile);
+  if (state.scan) state.plan = buildPlan(state.scan.fields);
   state.error = undefined; render();
+}
+
+async function importAttachment(file: File) {
+  const maxBytes = 50 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    state.error = "附件超过 50 MB，招聘页面通常也不会接受";
+    render();
+    return;
+  }
+  const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+  state.asset = { name: file.name, type: file.type || "application/octet-stream", bytes };
+  if (state.scan) state.plan = buildPlan(state.scan.fields);
+  state.error = undefined;
+  render();
 }
 
 async function unlock() {
@@ -126,6 +192,10 @@ function render() {
   const file = h("input", { type: "file", accept: ".yaml,.yml,.json" }) as HTMLInputElement;
   file.onchange = () => { const selected = file.files?.[0]; if (selected) void importProfile(selected).catch((error) => { state.error = error instanceof Error ? error.message : "资料导入失败"; render(); }); };
   profileSection.append(file);
+  profileSection.append(h("p", { class: "muted attachment-help", text: state.asset ? `简历附件：${state.asset.name}` : "需要自动上传简历时，请在这里选择 PDF/DOC/DOCX 文件" }));
+  const attachment = h("input", { type: "file", accept: ".pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png" }) as HTMLInputElement;
+  attachment.onchange = () => { const selected = attachment.files?.[0]; if (selected) void importAttachment(selected).catch((error) => { state.error = error instanceof Error ? error.message : "附件读取失败"; render(); }); };
+  profileSection.append(attachment);
 
   const content = h("section", { class: "card" });
   if (state.scan) {
