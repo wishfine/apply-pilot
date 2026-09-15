@@ -32,6 +32,20 @@ describe("extension field planning", () => {
     expect(plan.every((item) => item.decision === "fill")).toBe(true);
   });
 
+  it("maps abbreviated education and internship labels even when one page contains several sections", () => {
+    const detailedProfile = { ...profile, identity: { ...profile.identity, id_number: "110101200001010011" }, education: [{ id: "edu", school_name: "北京大学", education_level: "master", major: "计算机" , start_date: "2023-09", end_date: "2026-06" }], experiences: [{ id: "exp", experience_type: "internship", org_name: "字节跳动", title: "算法实习生", start_date: "2025-06", end_date: "2025-09" }] };
+    const plan = mapFields([field("身份证"), field("学院名称"), field("结束时间"), field("单位名称"), field("职位名称")], detailedProfile);
+    expect(plan.map((item) => item.proposedValue)).toEqual(["110101200001010011", "北京大学", "2026-06", "字节跳动", "算法实习生"]);
+    expect(plan.every((item) => item.decision === "fill")).toBe(true);
+  });
+
+  it("maps project fields from the latest project record", () => {
+    const projectProfile = { ...profile, projects: [{ id: "old", project_name: "旧项目", role: "开发者", start_date: "2024-01", end_date: "2024-06", summary: "旧简介", description_bullets: ["旧内容"] }, { id: "new", project_name: "ApplyPilot", role: "核心开发者", start_date: "2026-01", end_date: "2026-06", summary: "网申助手", description_bullets: ["设计字段映射", "实现浏览器插件"] }] };
+    const plan = mapFields([field("项目名称"), field("项目角色"), field("项目简介"), field("项目描述"), field("开始日期"), field("结束日期")], projectProfile, "项目经历");
+    expect(plan.map((item) => item.proposedValue)).toEqual(["ApplyPilot", "核心开发者", "网申助手", "设计字段映射\n实现浏览器插件", "2026-01", "2026-06"]);
+    expect(plan.every((item) => item.decision === "fill")).toBe(true);
+  });
+
   it("never overwrites an existing value and explains missing mappings", () => {
     const plan = mapFields([field("姓名", "用户已填写"), field("自定义问题")], profile);
     expect(plan[0]).toMatchObject({ decision: "skip", reason: "已有内容，已保留" });

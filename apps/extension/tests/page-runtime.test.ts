@@ -60,6 +60,13 @@ describe("page runtime", () => {
     expect(result.activeSection).toBe("实习经历");
   });
 
+  it("recognizes project navigation and headings as a separate section", () => {
+    document.body.innerHTML = `<nav><a class="nav-item active">项目经历</a></nav><h1>项目经历</h1><input aria-label="项目名称">`;
+    const result = scanPage();
+    expect(result.sections).toMatchObject([{ label: "项目经历", active: true }]);
+    expect(result.activeSection).toBe("项目经历");
+  });
+
   it("does not treat a generic ellipsis placeholder as a field label", () => {
     document.body.innerHTML = `<div class="row"><span>邮箱</span><input placeholder="请输入..."></div>`;
     expect(scanPage().fields[0].label).toBe("邮箱");

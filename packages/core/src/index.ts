@@ -58,6 +58,7 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "民族": { path: "identity.ethnicity", value: (p) => p.identity?.ethnicity },
   "证件类型": { path: "identity.id_type", value: (p) => p.identity?.id_type },
   "身份证号": { path: "identity.id_number", value: (p) => p.identity?.id_number },
+  "身份证": { path: "identity.id_number", value: (p) => p.identity?.id_number },
   "证件号码": { path: "identity.id_number", value: (p) => p.identity?.id_number },
   "证件编号": { path: "identity.id_number", value: (p) => p.identity?.id_number },
   "出生日期": { path: "identity.birth_date", value: (p) => display(p.identity?.birth_date) },
@@ -93,31 +94,67 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "学历": { path: "education[highest].education_level", value: (p) => highest(p.education)?.education_level },
   "学位": { path: "education[highest].academic_degree", value: (p) => highest(p.education)?.academic_degree },
   "毕业时间": { path: "education[highest].end_date", value: (p) => display(highest(p.education)?.end_date) },
+  "结束时间": { path: "education[highest].end_date", value: (p) => display(highest(p.education)?.end_date) },
+  "结束日期": { path: "education[highest].end_date", value: (p) => display(highest(p.education)?.end_date) },
+  "开始时间": { path: "education[highest].start_date", value: (p) => display(highest(p.education)?.start_date) },
+  "开始日期": { path: "education[highest].start_date", value: (p) => display(highest(p.education)?.start_date) },
   "入学时间": { path: "education[highest].start_date", value: (p) => display(highest(p.education)?.start_date) },
+  "学院名称": { path: "education[highest].school_name", value: (p) => highest(p.education)?.school_name },
 };
 
 const experienceAliases: Record<string, { path: string; value: (profile: CandidateProfile) => unknown }> = {
   "公司名称": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
+  "公司": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
   "单位名称": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
   "实习单位": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
   "实习公司": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
   "工作单位": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
+  "所在单位": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
+  "任职单位": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
+  "任职公司": { path: "experiences[latest].org_name", value: (p) => latestExperience(p.experiences)?.org_name },
   "职位": { path: "experiences[latest].title", value: (p) => latestExperience(p.experiences)?.title },
   "岗位": { path: "experiences[latest].title", value: (p) => latestExperience(p.experiences)?.title },
   "岗位名称": { path: "experiences[latest].title", value: (p) => latestExperience(p.experiences)?.title },
+  "职位名称": { path: "experiences[latest].title", value: (p) => latestExperience(p.experiences)?.title },
   "职务": { path: "experiences[latest].title", value: (p) => latestExperience(p.experiences)?.title },
+  "任职岗位": { path: "experiences[latest].title", value: (p) => latestExperience(p.experiences)?.title },
+  "实习岗位": { path: "experiences[latest].title", value: (p) => latestExperience(p.experiences)?.title },
   "部门": { path: "experiences[latest].department", value: (p) => latestExperience(p.experiences)?.department },
   "所在城市": { path: "experiences[latest].city", value: (p) => latestExperience(p.experiences)?.city },
   "工作城市": { path: "experiences[latest].city", value: (p) => latestExperience(p.experiences)?.city },
   "开始时间": { path: "experiences[latest].start_date", value: (p) => display(latestExperience(p.experiences)?.start_date) },
+  "开始日期": { path: "experiences[latest].start_date", value: (p) => display(latestExperience(p.experiences)?.start_date) },
   "入职时间": { path: "experiences[latest].start_date", value: (p) => display(latestExperience(p.experiences)?.start_date) },
   "实习开始时间": { path: "experiences[latest].start_date", value: (p) => display(latestExperience(p.experiences)?.start_date) },
   "结束时间": { path: "experiences[latest].end_date", value: (p) => display(latestExperience(p.experiences)?.end_date) },
+  "结束日期": { path: "experiences[latest].end_date", value: (p) => display(latestExperience(p.experiences)?.end_date) },
   "离职时间": { path: "experiences[latest].end_date", value: (p) => display(latestExperience(p.experiences)?.end_date) },
   "实习结束时间": { path: "experiences[latest].end_date", value: (p) => display(latestExperience(p.experiences)?.end_date) },
   "工作内容": { path: "experiences[latest].description_bullets", value: (p) => experienceDescription(p.experiences) },
   "实习内容": { path: "experiences[latest].description_bullets", value: (p) => experienceDescription(p.experiences) },
   "工作描述": { path: "experiences[latest].description_bullets", value: (p) => experienceDescription(p.experiences) },
+  "工作职责": { path: "experiences[latest].description_bullets", value: (p) => experienceDescription(p.experiences) },
+};
+
+const projectAliases: Record<string, { path: string; value: (profile: CandidateProfile) => unknown }> = {
+  "项目名称": { path: "projects[latest].project_name", value: (p) => latestProject(p.projects)?.project_name },
+  "项目标题": { path: "projects[latest].project_name", value: (p) => latestProject(p.projects)?.project_name },
+  "项目角色": { path: "projects[latest].role", value: (p) => latestProject(p.projects)?.role },
+  "项目职责": { path: "projects[latest].role", value: (p) => latestProject(p.projects)?.role },
+  "担任角色": { path: "projects[latest].role", value: (p) => latestProject(p.projects)?.role },
+  "项目简介": { path: "projects[latest].summary", value: (p) => latestProject(p.projects)?.summary },
+  "项目介绍": { path: "projects[latest].summary", value: (p) => latestProject(p.projects)?.summary },
+  "项目描述": { path: "projects[latest].description_bullets", value: (p) => projectDescription(p.projects) },
+  "项目内容": { path: "projects[latest].description_bullets", value: (p) => projectDescription(p.projects) },
+  "项目成果": { path: "projects[latest].description_bullets", value: (p) => projectDescription(p.projects) },
+  "项目链接": { path: "projects[latest].repo_url", value: (p) => latestProject(p.projects)?.repo_url },
+  "项目地址": { path: "projects[latest].repo_url", value: (p) => latestProject(p.projects)?.repo_url },
+  "项目开始时间": { path: "projects[latest].start_date", value: (p) => display(latestProject(p.projects)?.start_date) },
+  "项目结束时间": { path: "projects[latest].end_date", value: (p) => display(latestProject(p.projects)?.end_date) },
+  "开始时间": { path: "projects[latest].start_date", value: (p) => display(latestProject(p.projects)?.start_date) },
+  "结束时间": { path: "projects[latest].end_date", value: (p) => display(latestProject(p.projects)?.end_date) },
+  "开始日期": { path: "projects[latest].start_date", value: (p) => display(latestProject(p.projects)?.start_date) },
+  "结束日期": { path: "projects[latest].end_date", value: (p) => display(latestProject(p.projects)?.end_date) },
 };
 
 function display(value: unknown): unknown {
@@ -141,6 +178,10 @@ function latestExperience(records: Array<Record<string, unknown>> | undefined) {
   return [...(internships.length ? internships : records || [])].sort((a, b) => dateSortKey(b.end_date || b.start_date).localeCompare(dateSortKey(a.end_date || a.start_date)))[0];
 }
 
+function latestProject(records: Array<Record<string, unknown>> | undefined) {
+  return [...(records || [])].sort((a, b) => dateSortKey(b.end_date || b.start_date).localeCompare(dateSortKey(a.end_date || a.start_date)))[0];
+}
+
 function dateSortKey(value: unknown) {
   if (typeof value === "string") return value;
   if (value && typeof value === "object") {
@@ -153,6 +194,13 @@ function dateSortKey(value: unknown) {
 function experienceDescription(records: Array<Record<string, unknown>> | undefined) {
   const bullets = latestExperience(records)?.description_bullets;
   return Array.isArray(bullets) ? bullets.filter((bullet): bullet is string => typeof bullet === "string").join("\n") : undefined;
+}
+
+function projectDescription(records: Array<Record<string, unknown>> | undefined) {
+  const project = latestProject(records);
+  if (!project) return undefined;
+  if (Array.isArray(project.description_bullets)) return project.description_bullets.filter((bullet): bullet is string => typeof bullet === "string").join("\n");
+  return project.summary;
 }
 
 function weight(value: unknown) {
@@ -168,18 +216,34 @@ function normalize(value: string) {
   return value.replace(/[\s:*：\/／,，.。·()（）【】\[\]必选填项_-]/g, "").toLowerCase();
 }
 
-function fieldKey(field: PageField, section?: string) {
+function findKey(field: PageField, rules: Record<string, unknown>) {
   const value = normalize(`${field.label}${field.name}`);
-  const keys = section === "实习经历" ? Object.keys(experienceAliases) : Object.keys(aliases);
-  return keys.find((key) => value === normalize(key) || value.includes(normalize(key))) || "";
+  return Object.keys(rules).find((key) => value === normalize(key) || value.includes(normalize(key))) || "";
+}
+
+function fieldRule(field: PageField, section?: string) {
+  if (section === "实习经历") {
+    const key = findKey(field, experienceAliases);
+    if (key) return experienceAliases[key];
+  }
+  if (section === "项目经历") {
+    const key = findKey(field, projectAliases);
+    if (key) return projectAliases[key];
+  }
+  const baseKey = findKey(field, aliases);
+  if (baseKey) return aliases[baseKey];
+  const experienceKey = findKey(field, experienceAliases);
+  if (experienceKey && !["开始时间", "结束时间"].includes(experienceKey)) return experienceAliases[experienceKey];
+  const projectKey = findKey(field, projectAliases);
+  if (projectKey) return projectAliases[projectKey];
+  return undefined;
 }
 
 export function mapFields(fields: PageField[], profile?: CandidateProfile, section?: string): FieldPlan[] {
   return fields.map((field) => {
     if (field.value.trim()) return { field, decision: "skip", reason: "已有内容，已保留" };
     if (!profile) return { field, decision: "review", reason: "请先导入候选人资料" };
-    const key = fieldKey(field, section);
-    const rule = (section === "实习经历" ? experienceAliases[key] : undefined) || aliases[key];
+    const rule = fieldRule(field, section);
     if (!rule) return { field, decision: "review", reason: "没有唯一的字段规则，请手动选择资料" };
     const value = rule.value(profile);
     if (value === undefined || value === null || String(value).trim() === "") return { field, decision: "review", profilePath: rule.path, reason: `资料缺少：${rule.path}` };

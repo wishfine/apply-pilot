@@ -96,7 +96,7 @@ export function scanPage(): PageScan {
     const value = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement ? control.value : clean(element.textContent);
     fields.push({ ref, label, name: clean(control.name || element.id || hint), type, kind, required: Boolean((control as HTMLInputElement).required || element.getAttribute("aria-required") === "true"), value, options });
   }
-  const knownSections = ["个人信息", "求职意向", "教育经历", "实习经历", "在校实践", "获奖情况", "论文/专著", "证书", "其他信息", "简历附件"];
+  const knownSections = ["个人信息", "求职意向", "教育经历", "实习经历", "项目经历", "在校实践", "获奖情况", "论文/专著", "证书", "其他信息", "简历附件"];
   const sections: PageSection[] = [];
   const sectionCandidates = document.querySelectorAll("a, button, [role='tab'], [role='menuitem'], [class*='menu-item'], [class*='nav-item'], [class*='side-item']");
   for (const element of Array.from(sectionCandidates)) {
