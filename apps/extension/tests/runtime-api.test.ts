@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyApiPlan, isLoopbackEndpoint } from "../runtime/api";
+import { applyApiPlan, isLoopbackEndpoint, isModelProviderEndpoint, normalizeApplyPilotEndpoint, validateApplyPilotEndpoint } from "../runtime/api";
 import type { PageScan } from "../runtime/page";
 
 const scan: PageScan = {
@@ -20,6 +20,15 @@ describe("local mapping API client", () => {
     expect(isLoopbackEndpoint("http://127.0.0.1:8765")).toBe(true);
     expect(isLoopbackEndpoint("http://localhost:8765")).toBe(true);
     expect(isLoopbackEndpoint("https://api.example.com")).toBe(false);
+  });
+
+  it("distinguishes a model provider endpoint from the ApplyPilot planning service", () => {
+    expect(isModelProviderEndpoint("https://api.deepseek.com/v1")).toBe(true);
+    expect(validateApplyPilotEndpoint("https://api.deepseek.com/v1", true)).toMatch(/不是 DeepSeek\/OpenAI 模型地址/);
+    expect(validateApplyPilotEndpoint("http://127.0.0.1:8765")).toBeUndefined();
+    expect(validateApplyPilotEndpoint("https://applypilot.example.com", false)).toMatch(/远程 ApplyPilot 服务默认关闭/);
+    expect(validateApplyPilotEndpoint("https://applypilot.example.com", true)).toBeUndefined();
+    expect(normalizeApplyPilotEndpoint("http://127.0.0.1:8765/v1/")).toBe("http://127.0.0.1:8765");
   });
 
   it("joins API plan items back to frame-aware scanned fields", () => {

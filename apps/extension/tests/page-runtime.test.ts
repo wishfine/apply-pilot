@@ -91,4 +91,14 @@ describe("page runtime", () => {
     document.body.innerHTML = `<h2>实习经历</h2><div class="experience-record" data-record-id="exp-1"><input aria-label="单位名称"></div><div class="experience-record" data-record-id="exp-2"><input aria-label="单位名称"></div>`;
     expect(scanPage().fields.map((field) => field.recordGroup)).toEqual(["实习经历:exp-1", "实习经历:exp-2"]);
   });
+
+  it("detects required markers on parent rows and associated labels", () => {
+    document.body.innerHTML = `<div class="row is-required"><span>身份证号</span><input aria-label="身份证号"></div><div class="row" aria-required="true"><span>出生日期</span><input aria-label="出生日期"></div><label for="email"><span class="required-star">*</span> 邮箱</label><input id="email" aria-label="邮箱"><div class="row"><span>QQ（选填）</span><input aria-label="QQ"></div>`;
+    expect(scanPage().fields.map((field) => field.required)).toEqual([true, true, true, false]);
+  });
+
+  it("does not mistake unrelated asterisks for required markers", () => {
+    document.body.innerHTML = `<div class="row"><span>项目名称</span><span>匹配规则：*</span><input aria-label="项目名称"></div>`;
+    expect(scanPage().fields[0].required).toBe(false);
+  });
 });

@@ -37,6 +37,41 @@ export function scanPage(): PageScan {
     copy.querySelectorAll("input, textarea, select, button, [contenteditable='true'], [role='textbox'], [role='combobox'], [role='radio'], [role='checkbox']").forEach((control) => control.remove());
     return clean(copy.textContent);
   };
+  const pseudoContent = (element: Element | null) => {
+    if (!element) return "";
+    if (typeof navigator !== "undefined" && /jsdom/i.test(navigator.userAgent)) return "";
+    try {
+      return `${getComputedStyle(element, "::before").content || ""} ${getComputedStyle(element, "::after").content || ""}`;
+    } catch {
+      return "";
+    }
+  };
+  const requiredFor = (element: Element, label: string, associated: Element | null, nearby: Element | null, container: Element | null) => {
+    const input = element as HTMLInputElement;
+    const hardRequired = (input.required === true)
+      || element.getAttribute("aria-required") === "true"
+      || ["data-required", "data-is-required", "data-required-field"].some((name) => /^(true|1|required|必填|必选)$/i.test(element.getAttribute(name) || ""));
+    if (hardRequired) return true;
+
+    const nodes: Element[] = [];
+    const add = (node: Element | null) => { if (node && !nodes.includes(node)) nodes.push(node); };
+    add(element);
+    add(associated);
+    add(nearby);
+    add(container);
+    let current: Element | null = element.parentElement;
+    for (let depth = 0; current && depth < 5; depth += 1, current = current.parentElement) {
+      add(current);
+      if (current.getAttribute("aria-required") === "true" || ["data-required", "data-is-required", "data-required-field"].some((name) => /^(true|1|required|必填|必选)$/i.test(current?.getAttribute(name) || "")) || /(?:^|[-_ ])(?:is[-_ ]?)?(?:required|mandatory|must|required-field)(?:$|[-_ ])/i.test(current.className || "")) return true;
+      if (current === document.body || current === document.documentElement) break;
+    }
+    const semanticTexts = [associated, nearby].filter((node): node is Element => Boolean(node)).map(textWithoutControls);
+    const semanticMarker = [label, ...nodes.flatMap((node) => [node.className || "", node.getAttribute("aria-label") || "", node.getAttribute("data-label") || ""]), ...semanticTexts].join(" ").slice(0, 1200);
+    const starMarker = [label, associated?.textContent || "", nearby?.textContent || "", ...nodes.map(pseudoContent)].join(" ");
+    // Explicit optional markers take precedence over a generic asterisk in nearby text.
+    if (/选填|非必填|可选|optional/i.test(semanticMarker) || /选填|非必填|可选|optional/i.test(starMarker)) return false;
+    return /必填|必选|required|is[-_ ]?required|must[-_ ]?fill|necess(?:ary|ity)/i.test(semanticMarker) || /[*＊]/.test(starMarker);
+  };
   const previousSiblingLabel = (element: Element, hint: string) => {
     let current: Element | null = element;
     for (let depth = 0; current && depth < 6; depth += 1) {
@@ -46,11 +81,11 @@ export function scanPage(): PageScan {
       const index = siblings.indexOf(current);
       for (let i = index - 1; i >= 0; i -= 1) {
         const candidate = usefulLabel(textWithoutControls(siblings[i]), hint);
-        if (candidate) return candidate;
+        if (candidate && (!/[*＊]/.test(candidate) || /^[*＊]\s*[^*＊]/.test(candidate) || /^[^:*＊：]{1,40}\s*[*＊]$/.test(candidate))) return candidate;
       }
       const preceding = current.previousElementSibling;
       const candidate = usefulLabel(preceding ? textWithoutControls(preceding) : "", hint);
-      if (candidate) return candidate;
+      if (candidate && (!/[*＊]/.test(candidate) || /^[*＊]\s*[^*＊]/.test(candidate) || /^[^:*＊：]{1,40}\s*[*＊]$/.test(candidate))) return candidate;
       current = ancestor;
     }
     return "";
@@ -109,8 +144,7 @@ export function scanPage(): PageScan {
     const explicit = clean(element.getAttribute("data-label") || element.getAttribute("data-field-label") || element.getAttribute("title"));
     const label = usefulLabel(labelledBy, hint) || usefulLabel(associated?.textContent || "", hint) || usefulLabel(nearby?.textContent || "", hint) || usefulLabel(explicit, hint) || previousSiblingLabel(element, hint) || usefulLabel(hint, hint) || usefulLabel(uploadHost?.textContent || "", hint) || (type === "file" ? "附件上传" : "");
     if (!label) continue;
-    const requiredMarker = `${label} ${nearby?.textContent || ""} ${(container?.textContent || "").slice(0, 240)} ${container?.className || ""}`;
-    const required = Boolean((control as HTMLInputElement).required || element.getAttribute("aria-required") === "true" || /[*＊]|必填|required|is-required/i.test(requiredMarker));
+    const required = requiredFor(element, label, associated, nearby ?? null, container);
     let kind: PageField["kind"] = "unsupported";
     if (element instanceof HTMLSelectElement) kind = "select";
     else if (type === "file") kind = "file";

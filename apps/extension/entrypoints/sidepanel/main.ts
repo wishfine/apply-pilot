@@ -1,7 +1,7 @@
 import { parse as parseYaml } from "yaml";
 import { mapFields, parseCandidateProfile, type CandidateProfile, type FieldPlan } from "../../../../packages/core/src/index";
 import { OperationStore, ProfileStore } from "../../../../packages/storage/src/index";
-import { applyApiPlan, DEFAULT_API_ENDPOINT, isLoopbackEndpoint, requestFormPlan } from "../../runtime/api";
+import { applyApiPlan, DEFAULT_API_ENDPOINT, isLoopbackEndpoint, requestFormPlan, validateApplyPilotEndpoint } from "../../runtime/api";
 import { clickSection, clearFileBuffer, fillField, fillFileChunk, scanPage, type FilePayload, type FillReceipt, type PageScan, type PageSection } from "../../runtime/page";
 import "../../styles/sidepanel.css";
 
@@ -107,13 +107,19 @@ async function loadApiSettings() {
 
 async function refreshPlanFromApi() {
   if (!state.profile || !state.scan) return false;
+  const endpointError = validateApplyPilotEndpoint(state.apiEndpoint, state.allowRemoteApi);
+  if (endpointError) {
+    state.apiStatus = "fallback";
+    state.warning = endpointError;
+    return false;
+  }
   if (!isLoopbackEndpoint(state.apiEndpoint) && !state.allowRemoteApi) {
     state.apiStatus = "fallback";
     state.warning = "远程 API 默认关闭，当前使用本地规则；如需发送资料到远程服务，请显式勾选远程处理";
     return false;
   }
   try {
-    const response = await requestFormPlan(state.apiEndpoint, state.profile, state.scan, state.apiToken);
+    const response = await requestFormPlan(state.apiEndpoint, state.profile, state.scan, state.apiToken, state.allowRemoteApi);
     const remotePlan = applyApiPlan(state.scan, response);
     if (remotePlan.length !== state.scan.fields.length) throw new Error("API 返回的字段数量与页面扫描结果不一致");
     state.plan = applyAssetOverrides(remotePlan, state.scan.fields);
@@ -284,16 +290,16 @@ function render() {
   const attachment = h("input", { type: "file", accept: ".pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png" }) as HTMLInputElement;
   attachment.onchange = () => { const selected = attachment.files?.[0]; if (selected) void importAttachment(selected).catch((error) => { state.error = error instanceof Error ? error.message : "附件读取失败"; render(); }); };
   profileSection.append(attachment);
-  const apiEndpoint = h("input", { type: "url", value: state.apiEndpoint, placeholder: "本机 API 地址（默认 127.0.0.1:8765）" }) as HTMLInputElement;
-  const apiToken = h("input", { type: "password", value: state.apiToken || "", placeholder: "API 令牌（可选）" }) as HTMLInputElement;
+  const apiEndpoint = h("input", { type: "url", value: state.apiEndpoint, placeholder: "ApplyPilot 服务地址（默认 127.0.0.1:8765）" }) as HTMLInputElement;
+  const apiToken = h("input", { type: "password", value: state.apiToken || "", placeholder: "ApplyPilot 服务令牌（可选）" }) as HTMLInputElement;
   const allowRemote = h("input", { type: "checkbox" }) as HTMLInputElement;
   allowRemote.checked = state.allowRemoteApi;
   const remoteLabel = h("label", { class: "muted", text: "允许远程 API 处理简历资料" }, [allowRemote]);
   const saveApi = h("button", { class: "small-button", text: state.apiStatus === "connected" ? "API 已连接" : "保存 API 地址" }) as HTMLButtonElement;
   saveApi.disabled = state.busy;
-  saveApi.onclick = () => { const value = apiEndpoint.value.trim().replace(/\/$/, ""); if (!/^https?:\/\//i.test(value)) { state.error = "API 地址必须以 http:// 或 https:// 开头"; render(); return; } if (!isLoopbackEndpoint(value) && !allowRemote.checked) { state.error = "远程 API 默认关闭；请勾选远程处理后再保存"; render(); return; } state.apiEndpoint = value; state.apiToken = apiToken.value.trim() || undefined; state.allowRemoteApi = allowRemote.checked; void chrome.storage.local.set({ apiEndpoint: value, apiToken: state.apiToken || "", allowRemoteApi: state.allowRemoteApi }).then(() => { state.apiStatus = "unknown"; state.error = undefined; render(); }); };
-  profileSection.append(h("div", { class: "unlock-row" }, [apiEndpoint, saveApi]), h("div", { class: "unlock-row" }, [apiToken]), remoteLabel);
-  profileSection.append(h("p", { class: "muted", text: state.apiStatus === "connected" ? "已使用本机 API 返回的字段计划" : state.apiStatus === "fallback" ? "API 暂不可用，当前使用本地规则" : "扫描时会优先请求本机 API，失败后自动使用本地规则" }));
+  saveApi.onclick = () => { const value = apiEndpoint.value.trim().replace(/\/$/, ""); const validationError = validateApplyPilotEndpoint(value, allowRemote.checked); if (validationError) { state.error = validationError; render(); return; } state.apiEndpoint = value; state.apiToken = apiToken.value.trim() || undefined; state.allowRemoteApi = allowRemote.checked; void chrome.storage.local.set({ apiEndpoint: value, apiToken: state.apiToken || "", allowRemoteApi: state.allowRemoteApi }).then(() => { state.apiStatus = "unknown"; state.error = undefined; render(); }); };
+  profileSection.append(h("p", { class: "muted", text: "ApplyPilot 服务地址（不是模型服务地址）" }), h("div", { class: "unlock-row" }, [apiEndpoint, saveApi]), h("div", { class: "unlock-row" }, [apiToken]), remoteLabel, h("p", { class: "muted", text: "DeepSeek/OpenAI 等模型地址和密钥请在 API 服务端配置，不要填在这里。" }));
+  profileSection.append(h("p", { class: "muted", text: state.apiStatus === "connected" ? "已使用 ApplyPilot 服务返回的字段计划" : state.apiStatus === "fallback" ? "ApplyPilot 服务暂不可用，当前使用本地规则" : "扫描时会优先请求 ApplyPilot 服务，失败后自动使用本地规则" }));
 
   const content = h("section", { class: "card" });
   if (state.scan) {

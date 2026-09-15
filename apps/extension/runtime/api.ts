@@ -12,6 +12,37 @@ export function isLoopbackEndpoint(endpoint: string): boolean {
   }
 }
 
+/** Returns true for vendor model endpoints that cannot serve ApplyPilot's form-plan route. */
+export function isModelProviderEndpoint(endpoint: string): boolean {
+  try {
+    const hostname = new URL(endpoint).hostname.toLowerCase();
+    return hostname === "api.deepseek.com" || hostname === "api.openai.com" || hostname.endsWith(".openai.azure.com");
+  } catch {
+    return false;
+  }
+}
+
+export function validateApplyPilotEndpoint(endpoint: string, allowRemote = false): string | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    return "ApplyPilot 服务地址必须是有效的 http:// 或 https:// 地址";
+  }
+  if (!/^https?:$/.test(parsed.protocol)) return "ApplyPilot 服务地址必须使用 http:// 或 https://";
+  if (isModelProviderEndpoint(endpoint)) {
+    return "这里需要填写 ApplyPilot 服务地址，不是 DeepSeek/OpenAI 模型地址。请填 http://127.0.0.1:8765；模型地址请在 API 服务端配置 APPLYPILOT_LLM_BASE_URL。";
+  }
+  if (!isLoopbackEndpoint(endpoint) && !allowRemote) return "远程 ApplyPilot 服务默认关闭；如确认服务可信，请勾选远程处理后再保存";
+  return undefined;
+}
+
+export function normalizeApplyPilotEndpoint(endpoint: string): string {
+  const parsed = new URL(endpoint);
+  parsed.pathname = parsed.pathname.replace(/\/v1\/?$/, "") || "/";
+  return parsed.toString().replace(/\/$/, "");
+}
+
 type ApiPlanItem = {
   field_ref: string;
   decision: "fill" | "review" | "skip";
@@ -33,11 +64,13 @@ export type ApiPlanResponse = {
   warnings: string[];
 };
 
-export async function requestFormPlan(endpoint: string, profile: CandidateProfile, scan: PageScan, token?: string): Promise<ApiPlanResponse> {
+export async function requestFormPlan(endpoint: string, profile: CandidateProfile, scan: PageScan, token?: string, allowRemote = false): Promise<ApiPlanResponse> {
+  const validationError = validateApplyPilotEndpoint(endpoint, allowRemote);
+  if (validationError) throw new Error(validationError);
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 4000);
   try {
-    const response = await fetch(`${endpoint.replace(/\/$/, "")}/v1/forms/plan`, {
+    const response = await fetch(`${normalizeApplyPilotEndpoint(endpoint)}/v1/forms/plan`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({
