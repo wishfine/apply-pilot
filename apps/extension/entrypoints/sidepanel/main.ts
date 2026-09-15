@@ -1,7 +1,7 @@
 import { parse as parseYaml } from "yaml";
 import { mapFields, parseCandidateProfile, type CandidateProfile, type FieldPlan } from "../../../../packages/core/src/index";
 import { OperationStore, ProfileStore } from "../../../../packages/storage/src/index";
-import { clearFileBuffer, fillField, fillFileChunk, scanPage, type FilePayload, type FillReceipt, type PageScan } from "../../runtime/page";
+import { clickSection, clearFileBuffer, fillField, fillFileChunk, scanPage, type FilePayload, type FillReceipt, type PageScan, type PageSection } from "../../runtime/page";
 import "../../styles/sidepanel.css";
 
 const store = new ProfileStore();
@@ -96,7 +96,7 @@ async function scan() {
     const frames = results.map((item) => ({ frameId: item.frameId ?? 0, scan: item.result as PageScan })).filter((item) => item.scan);
     if (!frames.length) throw new Error("页面没有返回扫描结果");
     const first = frames[0].scan;
-    state.scan = { url: first.url, title: first.title, pageState: first.pageState, documentReady: frames.every((item) => item.scan.documentReady), embeddedFrameCount: first.embeddedFrameCount, fields: frames.flatMap((item) => item.scan.fields.map((field) => ({ ...field, frameId: item.frameId }))) };
+    state.scan = { url: first.url, title: first.title, pageState: first.pageState, documentReady: frames.every((item) => item.scan.documentReady), embeddedFrameCount: first.embeddedFrameCount, sections: first.sections, fields: frames.flatMap((item) => item.scan.fields.map((field) => ({ ...field, frameId: item.frameId }))) };
     if (first.embeddedFrameCount > frames.length - 1) state.warning = "部分内嵌表单没有访问权限，已只扫描当前可访问的页面。";
     state.runId = crypto.randomUUID();
     state.plan = buildPlan(state.scan.fields);
@@ -159,6 +159,18 @@ async function fill() {
 async function start() {
   if (!state.scan) await scan();
   if (state.scan?.pageState === "form") await fill();
+}
+
+async function openSection(section: PageSection) {
+  if (!state.activeTab?.id || state.busy) return;
+  state.busy = true; state.error = undefined; render();
+  try {
+    const result = await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, frameIds: [0] }, func: clickSection, args: [section.ref] });
+    const receipt = result[0]?.result as FillReceipt | undefined;
+    if (!receipt?.ok) throw new Error(receipt?.message || "分区切换失败");
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await scan();
+  } catch (error) { state.error = explainBrowserError(error, "分区切换失败"); state.busy = false; render(); }
 }
 
 async function importProfile(file: File) {
@@ -230,6 +242,12 @@ function render() {
     }
     const counts = state.plan.reduce((acc, item) => { acc[item.decision] = (acc[item.decision] || 0) + 1; return acc; }, {} as Record<string, number>);
     content.append(h("div", { class: "summary", text: `发现 ${state.scan.fields.length} 项 · 可填写 ${counts.fill || 0} · 待处理 ${counts.review || 0} · 跳过 ${counts.skip || 0}` }));
+    if (state.scan.sections.length > 1) {
+      const sectionNav = h("div", { class: "section-nav" });
+      sectionNav.append(h("div", { class: "section-title", text: "网站分区" }));
+      state.scan.sections.forEach((section) => { const button = h("button", { class: `section-button ${section.active ? "active" : ""}`, text: section.label }) as HTMLButtonElement; button.disabled = state.busy; button.onclick = () => void openSection(section); sectionNav.append(button); });
+      content.append(sectionNav);
+    }
     const list = h("ul", { class: "field-list" });
     state.plan.forEach((item) => { const receipt = state.receipts[`${item.field.frameId ?? 0}:${item.field.ref}`]; const symbol = receipt?.ok ? "✓" : item.decision === "fill" ? "○" : item.decision === "review" ? "!" : "–"; list.append(h("li", { class: `field ${receipt?.ok ? "done" : item.decision}` }, [h("span", { class: "symbol", text: symbol }), h("div", {}, [h("strong", { text: item.field.label || item.field.name || "未命名字段" }), h("small", { text: receipt?.message || item.reason })])])); });
     content.append(list);

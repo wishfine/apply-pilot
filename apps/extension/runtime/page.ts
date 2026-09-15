@@ -10,7 +10,8 @@ export type PageField = {
   options: string[];
 };
 
-export type PageScan = { url: string; title: string; fields: PageField[]; documentReady: boolean; pageState: "form" | "login" | "loading" | "empty"; embeddedFrameCount: number };
+export type PageSection = { ref: string; label: string; active: boolean };
+export type PageScan = { url: string; title: string; fields: PageField[]; sections: PageSection[]; documentReady: boolean; pageState: "form" | "login" | "loading" | "empty"; embeddedFrameCount: number };
 export type FillReceipt = { ok: boolean; message: string; value?: string };
 export type FilePayload = { name: string; type: string; bytes: number[] };
 
@@ -23,6 +24,35 @@ export function scanPage(): PageScan {
     return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
   };
   const clean = (value: string | null | undefined) => (value || "").replace(/\s+/g, " ").trim();
+  const usefulLabel = (value: string, hint: string) => {
+    const candidate = clean(value);
+    if (!candidate) return "";
+    if (/^(请输入|请选择|选择|上传文件|点击上传|点击选择|请填写|选填|必填)$/i.test(candidate)) return "";
+    return candidate.length <= 80 ? candidate : "";
+  };
+  const textWithoutControls = (node: Element) => {
+    const copy = node.cloneNode(true) as Element;
+    copy.querySelectorAll("input, textarea, select, button, [contenteditable='true'], [role='textbox'], [role='combobox'], [role='radio'], [role='checkbox']").forEach((control) => control.remove());
+    return clean(copy.textContent);
+  };
+  const previousSiblingLabel = (element: Element, hint: string) => {
+    let current: Element | null = element;
+    for (let depth = 0; current && depth < 6; depth += 1) {
+      const ancestor: HTMLElement | null = current.parentElement;
+      if (!ancestor) break;
+      const siblings: Element[] = Array.from(ancestor.children);
+      const index = siblings.indexOf(current);
+      for (let i = index - 1; i >= 0; i -= 1) {
+        const candidate = usefulLabel(textWithoutControls(siblings[i]), hint);
+        if (candidate) return candidate;
+      }
+      const preceding = current.previousElementSibling;
+      const candidate = usefulLabel(preceding ? textWithoutControls(preceding) : "", hint);
+      if (candidate) return candidate;
+      current = ancestor;
+    }
+    return "";
+  };
   const roots: ParentNode[] = [document];
   const visitShadow = (root: ParentNode) => {
     root.querySelectorAll("*").forEach((node) => {
@@ -49,7 +79,9 @@ export function scanPage(): PageScan {
     const associated = element.id ? ownerRoot.querySelector(`label[for="${CSS.escape(element.id)}"]`) : null;
     const container = element.closest("label, .form-item, .form-group, .field, [class*='field'], [class*='form']");
     const nearby = container?.querySelector("label, legend, .label, [class*='label']");
-    const label = clean(associated?.textContent || nearby?.textContent || hint || uploadHost?.textContent || (type === "file" ? "附件上传" : ""));
+    const labelledBy = clean((element.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean).map((id) => ownerRoot.querySelector(`#${CSS.escape(id)}`)?.textContent || "").join(" "));
+    const explicit = clean(element.getAttribute("data-label") || element.getAttribute("data-field-label") || element.getAttribute("title"));
+    const label = usefulLabel(labelledBy, hint) || usefulLabel(associated?.textContent || "", hint) || usefulLabel(nearby?.textContent || "", hint) || usefulLabel(explicit, hint) || previousSiblingLabel(element, hint) || usefulLabel(hint, hint) || usefulLabel(uploadHost?.textContent || "", hint) || (type === "file" ? "附件上传" : "");
     if (!label) continue;
     let kind: PageField["kind"] = "unsupported";
     if (element instanceof HTMLSelectElement) kind = "select";
@@ -64,11 +96,23 @@ export function scanPage(): PageScan {
     const value = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement ? control.value : clean(element.textContent);
     fields.push({ ref, label, name: clean(control.name || element.id || hint), type, kind, required: Boolean((control as HTMLInputElement).required || element.getAttribute("aria-required") === "true"), value, options });
   }
+  const knownSections = ["个人信息", "求职意向", "教育经历", "实习经历", "在校实践", "获奖情况", "论文/专著", "证书", "其他信息", "简历附件"];
+  const sections: PageSection[] = [];
+  const sectionCandidates = document.querySelectorAll("a, button, [role='tab'], [role='menuitem'], [class*='menu-item'], [class*='nav-item'], [class*='side-item']");
+  for (const element of Array.from(sectionCandidates)) {
+    if (!visible(element)) continue;
+    const label = clean(element.textContent);
+    const matched = knownSections.find((candidate) => label === candidate || label.startsWith(candidate));
+    if (!matched || sections.some((section) => section.label === matched)) continue;
+    const ref = `ap-section-${sections.length}`;
+    element.setAttribute("data-applypilot-section-ref", ref);
+    sections.push({ ref, label: matched, active: /active|selected|current/i.test(element.className) || element.getAttribute("aria-current") === "page" || element.getAttribute("aria-selected") === "true" });
+  }
   const bodyText = clean(document.body?.innerText).slice(0, 12000);
   const loginPath = /(^|\/)(login|signin|auth|passport|xyzlogin)(?:\/|$)/i.test(location.pathname);
   const loginText = /(请先登录|欢迎登录|扫码登录|微信扫码登录|账号密码登录|短信登录|登录后投递|验证码登录)/i.test(bodyText);
   const pageState: PageScan["pageState"] = document.readyState === "loading" ? "loading" : loginPath || loginText ? "login" : fields.length ? "form" : "empty";
-  return { url: location.href, title: document.title, fields, documentReady: document.readyState !== "loading", pageState, embeddedFrameCount: document.querySelectorAll("iframe").length };
+  return { url: location.href, title: document.title, fields, sections, documentReady: document.readyState !== "loading", pageState, embeddedFrameCount: document.querySelectorAll("iframe").length };
 }
 
 /** This function is self-contained because Chrome serializes it for injection. */
@@ -199,4 +243,15 @@ export function clearFileBuffer(ref: string): void {
   };
   const element = findInRoot(document) as (HTMLInputElement & { __applypilotFileBuffer?: unknown }) | null;
   if (element) delete element.__applypilotFileBuffer;
+}
+
+export function clickSection(ref: string): FillReceipt {
+  const element = document.querySelector(`[data-applypilot-section-ref="${CSS.escape(ref)}"]`) as HTMLElement | null;
+  if (!element) return { ok: false, message: "页面分区已变化，请重新扫描" };
+  try {
+    element.click();
+    return { ok: true, message: `已切换到 ${element.textContent?.trim() || "目标分区"}，请等待页面更新` };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "分区切换失败" };
+  }
 }

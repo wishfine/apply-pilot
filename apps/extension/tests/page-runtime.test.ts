@@ -46,4 +46,11 @@ describe("page runtime", () => {
     const result = scanPage();
     expect(result.fields).toMatchObject([{ kind: "file", label: "上传简历" }]);
   });
+
+  it("extracts a real label when the control is next to a Chinese placeholder", () => {
+    document.body.innerHTML = `<nav><a>个人信息</a><a>实习经历</a></nav><div class="row"><span>姓名</span><input placeholder="请输入"></div>`;
+    const result = scanPage();
+    expect(result.fields[0]).toMatchObject({ label: "姓名" });
+    expect(result.sections.map((section) => section.label)).toEqual(["个人信息", "实习经历"]);
+  });
 });
