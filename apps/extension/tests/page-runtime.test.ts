@@ -86,4 +86,9 @@ describe("page runtime", () => {
     document.body.innerHTML = `<div class="section-title">项目经历</div><input aria-label="项目名称">`;
     expect(scanPage().fields[0].section).toBe("项目经历");
   });
+
+  it("keeps a stable record group for repeated experience containers", () => {
+    document.body.innerHTML = `<h2>实习经历</h2><div class="experience-record" data-record-id="exp-1"><input aria-label="单位名称"></div><div class="experience-record" data-record-id="exp-2"><input aria-label="单位名称"></div>`;
+    expect(scanPage().fields.map((field) => field.recordGroup)).toEqual(["实习经历:exp-1", "实习经历:exp-2"]);
+  });
 });

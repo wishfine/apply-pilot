@@ -76,6 +76,13 @@ track_app = typer.Typer(
 )
 app.add_typer(track_app, name="track")
 
+api_app = typer.Typer(
+    name="api",
+    help="Run the local profile and form-planning API.",
+    no_args_is_help=True,
+)
+app.add_typer(api_app, name="api")
+
 
 def version_callback(value: bool) -> None:
     """Print version and exit."""
@@ -96,6 +103,20 @@ def main(
     ),
 ) -> None:
     """ApplyPilot: One profile. Every application."""
+
+
+@api_app.command("serve")
+def api_serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address; keep loopback for local-only use."),
+    port: int = typer.Option(8765, "--port", min=1, max=65535, help="Local API port."),
+) -> None:
+    """Start the local API used by the browser extension."""
+    try:
+        import uvicorn
+    except ImportError as error:
+        console.print("[bold red]API dependencies are missing; run uv sync first.[/bold red]")
+        raise typer.Exit(code=1) from error
+    uvicorn.run("applypilot.api.app:create_app", factory=True, host=host, port=port)
 
 
 def _load_profile(path: Path) -> CandidateProfile:

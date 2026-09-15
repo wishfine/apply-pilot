@@ -7,7 +7,7 @@
 *One profile. Every application.*
 
 [![Python](https://img.shields.io/badge/Python-%3E%3D3.11-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/Tests-415%20Passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-416%20Passed-brightgreen.svg)](tests/)
 [![Architecture](https://img.shields.io/badge/Design-Local--first-orange.svg)](docs/superpowers/specs/2026-09-12-apply-pilot-v0.1-design.md)
 
 </div>
@@ -138,7 +138,18 @@ npm run extension:build
 
 插件资料在浏览器本地 IndexedDB 中保存，档案使用用户设置的密码解锁并以 AES-GCM 加密；密码不会发送到网页。默认只处理明确匹配且为空的普通文本、文本域、原生下拉和部分选择控件，已有内容会保留；登录、验证码、承诺勾选和无法确认的自定义控件会提示人工处理，最终提交仍由用户完成。需要自动触发简历上传时，在侧栏的“附件”选择框中再次选择 PDF；插件只能使用你主动选择的文件，不能根据 YAML 中的电脑路径读取文件。若侧栏不是从 ApplyPilot 工具栏图标打开，首次扫描可能会请求读取当前标签页信息和当前网站权限，这是为了定位当前页面，不会在后台扫描其他网站。
 
-当前插件 `0.1.4` 处于开发预览阶段。扫描器会优先提取真实标签而忽略“请输入”等占位符，识别字段所在分区和必填标记；自动流程只填写必填且为空的字段，选填字段保持留空。个人信息、教育、实习经历、项目经历、获奖和论文/专著的常见文本字段可按档案映射；同一页面的空白实习记录会按顺序分配不同公司，并跳过已在页面出现的经历。多段经历仍需要用户逐段核对，复杂下拉、级联地址和真实站点验收按[插件设计方案](docs/superpowers/specs/2026-09-15-browser-extension-design.md)继续实现。插件已通过 TypeScript 检查、27 项核心、页面运行时和加密存储测试，以及 WXT 构建验证，尚未声明科大讯飞、51job/中移等真实登录后页面的完整兼容。
+#### 本机字段匹配 API
+
+插件会优先请求本机 API 生成带来源路径、记录 ID、置信度和必填结论的字段计划。启动 API：
+
+```bash
+uv sync
+uv run applypilot api serve
+```
+
+默认监听 `http://127.0.0.1:8765`，侧栏可修改 API 地址。API 不操作网页、不点击提交；未启动或请求失败时插件自动回退本地规则。简历解析接口需要配置 `APPLYPILOT_LLM_API_KEY`，默认不保存请求内容；开启远程模型前请先核对发送范围和服务地址。接口说明见[API 设计](docs/superpowers/specs/2026-09-15-profile-mapping-api-design.md)。
+
+当前插件 `0.1.5` 处于开发预览阶段。扫描器会优先提取真实标签而忽略“请输入”等占位符，识别字段所在分区和必填标记；自动流程只填写必填且为空的字段，选填字段保持留空。插件优先请求本机 API 返回带来源证据的字段计划，API 不可用时回退本地规则。个人信息、教育、实习经历、项目经历、获奖和论文/专著的常见文本字段可按档案映射；同一页面的空白实习记录会按顺序分配不同公司，并跳过已在页面出现的经历。多段经历仍需要用户逐段核对，复杂下拉、级联地址和真实站点验收按[插件设计方案](docs/superpowers/specs/2026-09-15-browser-extension-design.md)继续实现。插件已通过 TypeScript 检查、31 项核心、页面运行时和加密存储测试，以及 WXT 构建验证，尚未声明科大讯飞、51job/中移等真实登录后页面的完整兼容。
 
 ### 5. 查看记录
 
@@ -206,7 +217,7 @@ APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run pytest tests/integration/ -q
 APPLYPILOT_REQUIRE_BROWSER_TESTS=1 uv run --isolated --python 3.13 --locked pytest -q
 ```
 
-当前共有 416 项 Python 测试，另有插件工作区的 27 项 TypeScript 测试。Python 测试包含真实浏览器表单回归、同源 iframe、延迟短信登录页、申请隔离和恢复校验测试；插件测试覆盖中文字段映射、常见个人字段、教育、实习、项目、获奖和论文经历、页面标签提取、分区识别、必填识别、已有内容保护和资料输入校验。浏览器测试使用本地合成表单和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
+当前共有 416 项 Python 测试，另有插件工作区的 31 项 TypeScript 测试和 7 项本机 API 合约测试。Python 测试包含真实浏览器表单回归、同源 iframe、延迟短信登录页、申请隔离和恢复校验测试；插件测试覆盖中文字段映射、常见个人字段、教育、实习、项目、获奖和论文经历、页面标签提取、分区识别、必填识别、API 计划拼接、已有内容保护和资料输入校验。本机 API 测试覆盖计划生成、重复经历分配、敏感字段授权、资料合并、简历文件上传和纠错元数据。浏览器测试使用本地合成页面和虚构资料，优先使用 Playwright Chromium，也可使用已安装的 Chrome。默认在两者均不可用时跳过相关测试；这部分 Chrome 回退只适用于测试，CLI 仍使用 Playwright Chromium。
 
 测试通过说明已覆盖的行为符合断言，不代表真实招聘站点全功能兼容。后续重点包括上下文映射、附件类型约束、登录与页面识别、可恢复申请状态机，以及真实平台组件适配。
 

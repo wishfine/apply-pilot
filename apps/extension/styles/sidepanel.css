@@ -36,3 +36,4 @@ input[type=file] { max-width: 100%; font-size: 12px; }
 .done .symbol { color: #1a9a67; }.review .symbol { color: #d48700; }.skip .symbol { color: #9aa3b4; }
 .error { margin-top: 12px; padding: 10px; color: #a3303d; background: #fff0f1; border: 1px solid #f5c8cd; border-radius: 8px; font-size: 12px; line-height: 1.5; }
 .warning { margin-top: 12px; padding: 10px; color: #72551b; background: #fff8e4; border: 1px solid #f2dfaa; border-radius: 8px; font-size: 12px; line-height: 1.5; }
+label.muted { display: flex; align-items: center; gap: 6px; font-size: 12px; }

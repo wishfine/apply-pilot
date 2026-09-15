@@ -9,6 +9,7 @@ export type PageField = {
   value: string;
   options: string[];
   section?: string;
+  recordGroup?: string;
 };
 
 export type PageSection = { ref: string; label: string; active: boolean };
@@ -81,6 +82,16 @@ export function scanPage(): PageScan {
     }
     return previous;
   };
+  const recordGroupFor = (element: Element, section?: string) => {
+    if (!section || !["实习经历", "项目经历", "获奖情况", "论文/专著", "证书", "在校实践"].includes(section)) return undefined;
+    const ancestor = element.closest("[data-record-id], [data-row-id], [data-item-id], [data-index], fieldset, [class*='experience'], [class*='Experience'], [class*='intern'], [class*='Intern'], [class*='project'], [class*='Project'], [class*='record'], [class*='Record'], [class*='entry'], [class*='Entry']");
+    if (!ancestor) return undefined;
+    const marker = ["data-record-id", "data-row-id", "data-item-id", "data-index"].map((name) => ancestor.getAttribute(name)).find(Boolean);
+    if (marker) return `${section}:${marker}`;
+    const peers = Array.from(document.querySelectorAll("fieldset, [class*='experience'], [class*='Experience'], [class*='intern'], [class*='Intern'], [class*='project'], [class*='Project'], [class*='record'], [class*='Record'], [class*='entry'], [class*='Entry']"));
+    const index = peers.filter((candidate) => candidate.parentElement === ancestor.parentElement).indexOf(ancestor);
+    return `${section}:${ancestor.tagName.toLowerCase()}:${Math.max(index, 0)}`;
+  };
   let sequence = 0;
   for (const element of Array.from(new Set(candidates))) {
     const control = element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
@@ -111,7 +122,8 @@ export function scanPage(): PageScan {
     element.setAttribute("data-applypilot-ref", ref);
     const options = element instanceof HTMLSelectElement ? Array.from(element.options).filter((option) => !option.disabled && clean(option.textContent)).map((option) => clean(option.textContent)) : [];
     const value = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement ? control.value : clean(element.textContent);
-    fields.push({ ref, label, name: clean(control.name || element.id || hint), type, kind, required, value, options, section: sectionFor(element) });
+    const section = sectionFor(element);
+    fields.push({ ref, label, name: clean(control.name || element.id || hint), type, kind, required, value, options, section, recordGroup: recordGroupFor(element, section) });
   }
   const sections: PageSection[] = [];
   const sectionCandidates = document.querySelectorAll("a, button, [role='tab'], [role='menuitem'], [class*='menu-item'], [class*='nav-item'], [class*='side-item']");
