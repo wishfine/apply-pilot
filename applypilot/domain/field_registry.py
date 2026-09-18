@@ -34,6 +34,7 @@ FIELD_REGISTRY: List[Tuple[str, str, str]] = [
     ("contact.wechat", "微信", "微信"),
     ("contact.emergency_contact_name", "紧急联系人姓名", "紧急联系人姓名"),
     ("contact.emergency_contact_phone", "紧急联系人电话", "紧急联系人电话"),
+    ("contact.emergency_contact_phone", "紧急联系方式", "紧急联系方式 (NEW)"),
     ("contact.emergency_contact_relation", "紧急联系人关系", "紧急联系人关系 (NEW)"),
     ("contact.home_phone", "家庭电话", "家庭电话 (NEW)"),
     ("contact.postal_code", "邮政编码", "邮政编码 (NEW)"),

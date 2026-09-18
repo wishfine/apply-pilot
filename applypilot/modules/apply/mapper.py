@@ -99,6 +99,20 @@ CANONICAL_EXACT_RULES: dict[str, str] = {
     "紧急联系人姓名": "contact.emergency_contact_name",
     "紧急联系人电话": "contact.emergency_contact_phone",
     "紧急联系人手机": "contact.emergency_contact_phone",
+    "紧急联系人手机号": "contact.emergency_contact_phone",
+    "紧急联系人手机号码": "contact.emergency_contact_phone",
+    "紧急联系人电话号码": "contact.emergency_contact_phone",
+    "紧急联系人联系方式": "contact.emergency_contact_phone",
+    "紧急联系人联系电话": "contact.emergency_contact_phone",
+    "紧急联系方式": "contact.emergency_contact_phone",
+    "紧急联系电话": "contact.emergency_contact_phone",
+    "紧急联系手机": "contact.emergency_contact_phone",
+    "紧急电话": "contact.emergency_contact_phone",
+    "紧急手机": "contact.emergency_contact_phone",
+    "紧急联系人关系": "contact.emergency_contact_relation",
+    "与紧急联系人关系": "contact.emergency_contact_relation",
+    "紧急联系人与本人关系": "contact.emergency_contact_relation",
+    "与本人关系": "contact.emergency_contact_relation",
     # 教育 (education)
     "毕业院校": "education[__HIGHEST__].school_name",
     "学校名称": "education[__HIGHEST__].school_name",
@@ -419,12 +433,12 @@ class FieldMapper:
         # 2. Emergency contact context
         is_emergency = "紧急" in clean_key or any(k in clean_sec for k in ("紧急联系人", "紧急联系"))
         if is_emergency:
-            if any(k in clean_key for k in ("手机", "电话")):
+            if any(k in clean_key for k in ("手机", "电话", "联系方式", "联络方式", "号码")):
                 return FieldMappingResult("contact.emergency_contact_phone", "exact_rule", 1.0)
-            if ("联系人" in clean_key or "姓名" in clean_key) and "关系" not in clean_key:
+            if ("联系人" in clean_key or "姓名" in clean_key or "名字" in clean_key) and "关系" not in clean_key:
                 return FieldMappingResult("contact.emergency_contact_name", "exact_rule", 1.0)
-            if "关系" in clean_key:
-                return FieldMappingResult(None, "unmapped", 0.0)
+            if "关系" in clean_key or "称谓" in clean_key:
+                return FieldMappingResult("contact.emergency_contact_relation", "exact_rule", 1.0)
 
         # 3. Education stage context
         edu_level = None

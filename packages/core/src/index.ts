@@ -314,12 +314,24 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "现居住地城市": { path: "contact.current_city[city]", value: (p) => extractLocationComponents(p.contact?.current_city || p.contact?.current_address).city },
   "现居住地(省)": { path: "contact.current_city[province]", value: (p) => extractLocationComponents(p.contact?.current_city || p.contact?.current_address).province },
   "现居住地(市)": { path: "contact.current_city[city]", value: (p) => extractLocationComponents(p.contact?.current_city || p.contact?.current_address).city },
-  "紧急联系人": { path: "contact.emergency_contact_name", value: (p) => p.contact?.emergency_contact_name },
-  "紧急联系人姓名": { path: "contact.emergency_contact_name", value: (p) => p.contact?.emergency_contact_name },
-  "紧急联系人电话": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone },
-  "紧急联系人手机": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone },
-  "紧急联系人关系": { path: "contact.emergency_contact_relation", value: (p) => p.contact?.emergency_contact_relation },
-  "与紧急联系人关系": { path: "contact.emergency_contact_relation", value: (p) => p.contact?.emergency_contact_relation },
+  "紧急联系人": { path: "contact.emergency_contact_name", value: (p) => p.contact?.emergency_contact_name || p.contact?.emergency_name },
+  "紧急联系人姓名": { path: "contact.emergency_contact_name", value: (p) => p.contact?.emergency_contact_name || p.contact?.emergency_name },
+  "紧急联系人电话": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone || p.contact?.emergency_contact_mobile || p.contact?.emergency_phone },
+  "紧急联系人手机": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone || p.contact?.emergency_contact_mobile || p.contact?.emergency_phone },
+  "紧急联系人手机号": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone || p.contact?.emergency_contact_mobile || p.contact?.emergency_phone },
+  "紧急联系人手机号码": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone || p.contact?.emergency_contact_mobile || p.contact?.emergency_phone },
+  "紧急联系人电话号码": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone || p.contact?.emergency_contact_mobile || p.contact?.emergency_phone },
+  "紧急联系人联系方式": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone || p.contact?.emergency_contact_mobile || p.contact?.emergency_phone },
+  "紧急联系人联系电话": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone || p.contact?.emergency_contact_mobile || p.contact?.emergency_phone },
+  "紧急联系方式": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone || p.contact?.emergency_contact_mobile || p.contact?.emergency_phone },
+  "紧急联系电话": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone || p.contact?.emergency_contact_mobile || p.contact?.emergency_phone },
+  "紧急联系手机": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone || p.contact?.emergency_contact_mobile || p.contact?.emergency_phone },
+  "紧急电话": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone || p.contact?.emergency_contact_mobile || p.contact?.emergency_phone },
+  "紧急手机": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone || p.contact?.emergency_contact_mobile || p.contact?.emergency_phone },
+  "紧急联系人关系": { path: "contact.emergency_contact_relation", value: (p) => p.contact?.emergency_contact_relation || p.contact?.emergency_relation },
+  "与紧急联系人关系": { path: "contact.emergency_contact_relation", value: (p) => p.contact?.emergency_contact_relation || p.contact?.emergency_relation },
+  "紧急联系人与本人关系": { path: "contact.emergency_contact_relation", value: (p) => p.contact?.emergency_contact_relation || p.contact?.emergency_relation },
+  "与本人关系": { path: "contact.emergency_contact_relation", value: (p) => p.contact?.emergency_contact_relation || p.contact?.emergency_relation },
   "家庭电话": { path: "contact.home_phone", value: (p) => p.contact?.home_phone },
   "固定电话": { path: "contact.home_phone", value: (p) => p.contact?.home_phone },
   "座机": { path: "contact.home_phone", value: (p) => p.contact?.home_phone },
@@ -669,7 +681,14 @@ function findKey(field: PageField, rules: Record<string, unknown>) {
     return true;
   });
 
-  if (candidateKeys.length === 0) return "";
+  if (candidateKeys.length === 0) {
+    if (isEmergency) {
+      if (fullValue.includes("关系") || fullValue.includes("称谓")) return "紧急联系人关系";
+      if (fullValue.includes("电话") || fullValue.includes("手机") || fullValue.includes("联系方式") || fullValue.includes("联络方式") || fullValue.includes("号码")) return "紧急联系方式";
+      if (fullValue.includes("姓名") || fullValue.includes("名字") || fullValue.includes("联系人") || fullValue.includes("人")) return "紧急联系人姓名";
+    }
+    return "";
+  }
 
   // Sort by length descending (longest / most specific rule wins!)
   candidateKeys.sort((a, b) => normalize(b).length - normalize(a).length);
@@ -678,6 +697,12 @@ function findKey(field: PageField, rules: Record<string, unknown>) {
 
 function fieldRule(field: PageField, section?: string, profile?: CandidateProfile): { rule: { path: string; value: (profile: CandidateProfile) => unknown }; source: MappingSource } | undefined {
   const scope = field.section || section;
+  if (scope && scope.includes("紧急")) {
+    const norm = normalize(field.label);
+    if (norm.includes("关系") || norm.includes("称谓")) return { rule: aliases["紧急联系人关系"], source: "base" };
+    if (norm.includes("电话") || norm.includes("手机") || norm.includes("联系方式") || norm.includes("联络方式") || norm.includes("号码")) return { rule: aliases["紧急联系方式"], source: "base" };
+    if (norm.includes("姓名") || norm.includes("名字") || norm.includes("联系人") || norm.includes("人")) return { rule: aliases["紧急联系人姓名"], source: "base" };
+  }
   if (scope === "实习经历") {
     const key = findKey(field, experienceAliases);
     if (key) return { rule: experienceAliases[key], source: "experience" };

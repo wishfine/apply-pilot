@@ -177,9 +177,11 @@ describe("extension field planning", () => {
     const plan = mapFields([
       field("姓名"),
       field("紧急联系人姓名"),
+      field("紧急联系方式"),
       field("紧急联系人电话"),
-      field("紧急联系人手机"),
+      field("紧急联系电话"),
       field("紧急联系人关系"),
+      field("与本人关系"),
     ], candidateProfile);
 
     expect(plan[0].proposedValue).toBe("金泽凯");
@@ -195,8 +197,14 @@ describe("extension field planning", () => {
     expect(plan[3].proposedValue).toBe("13900139000");
     expect(plan[3].profilePath).toBe("contact.emergency_contact_phone");
 
-    expect(plan[4].proposedValue).toBe("父亲");
-    expect(plan[4].profilePath).toBe("contact.emergency_contact_relation");
+    expect(plan[4].proposedValue).toBe("13900139000");
+    expect(plan[4].profilePath).toBe("contact.emergency_contact_phone");
+
+    expect(plan[5].proposedValue).toBe("父亲");
+    expect(plan[5].profilePath).toBe("contact.emergency_contact_relation");
+
+    expect(plan[6].proposedValue).toBe("父亲");
+    expect(plan[6].profilePath).toBe("contact.emergency_contact_relation");
   });
 
   it("matches political status dropdown options to full names when available", () => {
