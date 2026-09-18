@@ -104,6 +104,93 @@ CANONICAL_EXACT_RULES: dict[str, str] = {
     "政治面貌": "soe_extended.political_status",
     "籍贯": "soe_extended.native_place",
     "籍贯所在地": "soe_extended.native_place",
+    "户口类型": "soe_extended.household_type",
+    "户口性质": "soe_extended.household_type",
+    "户籍所在地": "soe_extended.household_registration",
+    "户籍地址": "soe_extended.household_registration",
+    "户口所在地": "soe_extended.household_registration",
+    "入党时间": "soe_extended.join_party_date",
+    "入团时间": "soe_extended.join_party_date",
+    "身高": "soe_extended.height_cm",
+    "体重": "soe_extended.weight_kg",
+    "血型": "soe_extended.blood_type",
+    "左眼视力": "soe_extended.eyesight_left",
+    "右眼视力": "soe_extended.eyesight_right",
+    "犯罪记录": "soe_extended.has_criminal_record",
+    "有无犯罪记录": "soe_extended.has_criminal_record",
+    "处分记录": "soe_extended.has_disciplinary_record",
+    "有无处分": "soe_extended.has_disciplinary_record",
+    "是否服从分配": "soe_extended.can_relocate",
+    "是否服从调剂": "soe_extended.can_relocate",
+    "服从调剂": "soe_extended.can_relocate",
+    "服从分配": "soe_extended.can_relocate",
+    "期望薪资": "soe_extended.expected_salary",
+    "期望月薪": "soe_extended.expected_salary",
+    "期望年薪": "soe_extended.expected_salary",
+    "最早到岗": "soe_extended.available_date",
+    "到岗时间": "soe_extended.available_date",
+    "最早到岗时间": "soe_extended.available_date",
+    "推荐人": "soe_extended.referrer_name",
+    "推荐人姓名": "soe_extended.referrer_name",
+    "推荐人工号": "soe_extended.referrer_employee_id",
+    "内推人": "soe_extended.referrer_name",
+    "内推工号": "soe_extended.referrer_employee_id",
+    "自我评价": "soe_extended.personal_statement",
+    "个人陈述": "soe_extended.personal_statement",
+    "个人简介": "soe_extended.personal_statement",
+    "个人总结": "soe_extended.personal_statement",
+    "兴趣爱好": "soe_extended.hobbies",
+    "爱好特长": "soe_extended.hobbies",
+    "特长": "soe_extended.strengths",
+    "个人特长": "soe_extended.strengths",
+    "个人优势": "soe_extended.strengths",
+    "海外经历": "soe_extended.has_overseas_background",
+    "有无海外经历": "soe_extended.has_overseas_background",
+    "海外亲属": "soe_extended.overseas_relatives",
+    "有无海外亲属": "soe_extended.overseas_relatives",
+    "驾照": "soe_extended.driving_license",
+    "驾驶证": "soe_extended.driving_license",
+    "驾照类型": "soe_extended.driving_license",
+    "计算机水平": "soe_extended.computer_proficiency",
+    "计算机等级": "soe_extended.computer_proficiency",
+    "普通话等级": "soe_extended.mandarin_level",
+    "普通话水平": "soe_extended.mandarin_level",
+    "出生地": "identity.birth_place",
+    "出生地点": "identity.birth_place",
+    "证件有效期": "identity.id_expiry_date",
+    "身份证有效期": "identity.id_expiry_date",
+    "邮编": "contact.postal_code",
+    "邮政编码": "contact.postal_code",
+    "家庭电话": "contact.home_phone",
+    "固定电话": "contact.home_phone",
+    "座机": "contact.home_phone",
+    "紧急联系人关系": "contact.emergency_contact_relation",
+    "与紧急联系人关系": "contact.emergency_contact_relation",
+    "院校类型": "education[__HIGHEST__].school_type",
+    "院校性质": "education[__HIGHEST__].school_type",
+    "学校类型": "education[__HIGHEST__].school_type",
+    "学习方式": "education[__HIGHEST__].study_mode",
+    "学习形式": "education[__HIGHEST__].study_mode",
+    "培养方式": "education[__HIGHEST__].study_mode",
+    "班级": "education[__HIGHEST__].class_name",
+    "所在班级": "education[__HIGHEST__].class_name",
+    "学号": "education[__HIGHEST__].student_id",
+    "健康状况": "identity.health_status",
+    "婚姻状况": "identity.marital_status",
+    "婚姻状态": "identity.marital_status",
+    "证件类型": "identity.id_type",
+    "国籍": "identity.nationality",
+    "毕业年份": "campus_context.graduation_year",
+    "四级成绩": "campus_context.cet4_score",
+    "六级成绩": "campus_context.cet6_score",
+    "四级分数": "campus_context.cet4_score",
+    "六级分数": "campus_context.cet6_score",
+    "cet4": "campus_context.cet4_score",
+    "cet6": "campus_context.cet6_score",
+    "雅思": "campus_context.ielts_score",
+    "雅思成绩": "campus_context.ielts_score",
+    "托福": "campus_context.toefl_score",
+    "托福成绩": "campus_context.toefl_score",
     # 附件与简历 (assets)
     "上传简历": "assets[asset_resume_pdf].file_path",
     "简历附件": "assets[asset_resume_pdf].file_path",
@@ -514,6 +601,100 @@ class FieldMapper:
                 method="semantic",
                 confidence=0.85,
             )
+
+        # SOE extended semantic heuristics
+        if "身高" in clean_key:
+            return FieldMappingResult(
+                profile_path="soe_extended.height_cm",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        if "体重" in clean_key:
+            return FieldMappingResult(
+                profile_path="soe_extended.weight_kg",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        if "血型" in clean_key:
+            return FieldMappingResult(
+                profile_path="soe_extended.blood_type",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        if "户口" in clean_key or "户籍" in clean_key:
+            if "类型" in clean_key or "性质" in clean_key:
+                return FieldMappingResult(
+                    profile_path="soe_extended.household_type",
+                    method="semantic",
+                    confidence=0.85,
+                )
+            return FieldMappingResult(
+                profile_path="soe_extended.household_registration",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        if "驾照" in clean_key or "驾驶证" in clean_key:
+            return FieldMappingResult(
+                profile_path="soe_extended.driving_license",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        if "服从" in clean_key and ("分配" in clean_key or "调剂" in clean_key):
+            return FieldMappingResult(
+                profile_path="soe_extended.can_relocate",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        if "自我评价" in clean_key or "个人陈述" in clean_key or "个人简介" in clean_key:
+            return FieldMappingResult(
+                profile_path="soe_extended.personal_statement",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        if "爱好" in clean_key or "兴趣" in clean_key:
+            return FieldMappingResult(
+                profile_path="soe_extended.hobbies",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        if "特长" in clean_key or "个人优势" in clean_key:
+            return FieldMappingResult(
+                profile_path="soe_extended.strengths",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        if "健康" in clean_key and "状况" in clean_key:
+            return FieldMappingResult(
+                profile_path="identity.health_status",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        if "婚姻" in clean_key:
+            return FieldMappingResult(
+                profile_path="identity.marital_status",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        if "邮编" in clean_key or "邮政编码" in clean_key:
+            return FieldMappingResult(
+                profile_path="contact.postal_code",
+                method="semantic",
+                confidence=0.85,
+            )
+
+        # Custom fields fallback for SOE: check label against custom_fields
+        # This is handled at a higher level by the engine, not here.
 
         # -----------------------------------------------------------------
         # Tier 4: Unmapped Fallback

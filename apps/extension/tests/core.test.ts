@@ -113,4 +113,51 @@ describe("extension field planning", () => {
     expect(imported.profile_id).toBe("cand_zhangsan_2026");
     expect(imported.education?.length).toBeGreaterThan(0);
   });
+
+  it("maps newly added SOE extended fields and custom_fields", () => {
+    const soeProfile = {
+      ...profile,
+      identity: { ...profile.identity, birth_place: "北京市海淀区", id_expiry_date: "2035-10-01" },
+      contact: { ...profile.contact, postal_code: "100084", home_phone: "010-12345678" },
+      soe_extended: {
+        height_cm: 180,
+        household_type: "城镇居民",
+        driving_license: "C1",
+        personal_statement: "踏实认真，学习能力强",
+        can_relocate: "yes",
+        custom_fields: {
+          "是否近视": "否",
+          "期望职级": "中级",
+        },
+      },
+    };
+    const plan = mapFields([
+      field("出生地"),
+      field("证件有效期"),
+      field("邮编"),
+      field("家庭电话"),
+      field("身高"),
+      field("户口类型"),
+      field("驾照类型"),
+      field("自我评价"),
+      field("是否服从分配"),
+      field("是否近视"),
+      field("期望职级"),
+    ], soeProfile);
+
+    expect(plan.map((item) => item.proposedValue)).toEqual([
+      "北京市海淀区",
+      "2035-10-01",
+      "100084",
+      "010-12345678",
+      "180",
+      "城镇居民",
+      "C1",
+      "踏实认真，学习能力强",
+      "yes",
+      "否",
+      "中级",
+    ]);
+    expect(plan.every((item) => item.decision === "fill")).toBe(true);
+  });
 });

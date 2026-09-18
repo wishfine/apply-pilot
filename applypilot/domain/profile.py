@@ -45,6 +45,9 @@ class IdentityInfo(_StrictModel):
     ethnicity: Optional[str] = None  # 严禁默认汉族
     health_status: Optional[str] = None  # 严禁默认健康
     marital_status: Optional[str] = None
+    birth_place: Optional[str] = None  # 出生地
+    id_expiry_date: Optional[str] = None  # 证件有效期
+    photo_path: Optional[str] = None  # 证件照路径
 
 
 class ContactInfo(_StrictModel):
@@ -58,6 +61,9 @@ class ContactInfo(_StrictModel):
     wechat: Optional[str] = None
     emergency_contact_name: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
+    emergency_contact_relation: Optional[str] = None  # 紧急联系人关系
+    home_phone: Optional[str] = None  # 家庭电话
+    postal_code: Optional[str] = None  # 邮政编码
 
 
 class EducationRecord(_StrictModel):
@@ -77,6 +83,10 @@ class EducationRecord(_StrictModel):
     is_first_degree: TriState = TriState.UNKNOWN
     is_highest_degree: TriState = TriState.UNKNOWN
     thesis_title: Optional[str] = None
+    school_type: Optional[str] = None  # 院校类型: 985 / 211 / 双一流 / 普通本科
+    study_mode: Optional[str] = None  # 学习方式: 全日制 / 非全日制
+    class_name: Optional[str] = None  # 班级
+    student_id: Optional[str] = None  # 学号
 
 
 class ExperienceRecord(_StrictModel):
@@ -183,6 +193,11 @@ class ChinaCampusContext(_StrictModel):
     ielts_score: Optional[float] = None
     toefl_score: Optional[int] = None
     has_dispatch_qualification: TriState = TriState.UNKNOWN
+    putonghua_level: Optional[str] = None  # 普通话等级
+    computer_rank: Optional[str] = None  # 计算机等级考试
+    scholarship_info: Optional[str] = None  # 奖学金情况
+    student_cadre: TriState = TriState.UNKNOWN  # 是否学生干部
+    is_fresh_graduate: TriState = TriState.UNKNOWN  # 是否应届毕业生
 
 
 class FamilyMember(_StrictModel):
@@ -195,6 +210,9 @@ class FamilyMember(_StrictModel):
     workplace: Optional[str] = None
     title: Optional[str] = None
     phone: Optional[str] = None
+    age: Optional[int] = None  # 年龄
+    id_number: Optional[str] = None  # 身份证号
+    is_party_member: TriState = TriState.UNKNOWN  # 是否党员
 
 
 class SOEExtendedInfo(_StrictModel):
@@ -208,6 +226,28 @@ class SOEExtendedInfo(_StrictModel):
     family_members: list[FamilyMember] = Field(default_factory=list)
     conflict_of_interest: TriState = TriState.UNKNOWN
     conflict_details: Optional[str] = None
+    height_cm: Optional[int] = None  # 身高(cm)
+    weight_kg: Optional[int] = None  # 体重(kg)
+    blood_type: Optional[str] = None  # 血型: A / B / O / AB
+    eyesight_left: Optional[float] = None  # 左眼视力
+    eyesight_right: Optional[float] = None  # 右眼视力
+    has_criminal_record: TriState = TriState.UNKNOWN  # 有无犯罪记录
+    has_disciplinary_record: TriState = TriState.UNKNOWN  # 有无处分记录
+    can_relocate: TriState = TriState.UNKNOWN  # 是否服从分配/调剂
+    expected_salary: Optional[str] = None  # 期望薪资
+    available_date: Optional[PartialDate] = None  # 最早到岗时间
+    referrer_name: Optional[str] = None  # 推荐人姓名
+    referrer_employee_id: Optional[str] = None  # 推荐人工号
+    personal_statement: Optional[str] = None  # 个人陈述/自我评价
+    strengths: Optional[str] = None  # 个人特长/优势
+    hobbies: Optional[str] = None  # 兴趣爱好
+    has_overseas_background: TriState = TriState.UNKNOWN  # 有无海外经历
+    overseas_relatives: TriState = TriState.UNKNOWN  # 有无海外亲属
+    has_commercial_insurance: TriState = TriState.UNKNOWN  # 有无商业保险
+    driving_license: Optional[str] = None  # 驾照类型: C1 / C2 / B1 等
+    computer_proficiency: Optional[str] = None  # 计算机水平/等级
+    mandarin_level: Optional[str] = None  # 普通话等级
+    custom_fields: dict[str, str] = Field(default_factory=dict)  # 用户自定义中文标签→值
 
 
 class StoryRecord(_StrictModel):

@@ -69,10 +69,14 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "证件号码": { path: "identity.id_number", value: (p) => p.identity?.id_number },
   "证件编号": { path: "identity.id_number", value: (p) => p.identity?.id_number },
   "出生日期": { path: "identity.birth_date", value: (p) => display(p.identity?.birth_date) },
-  "出生地": { path: "soe_extended.native_place", value: (p) => p.soe_extended?.native_place },
+  "出生地": { path: "identity.birth_place", value: (p) => p.identity?.birth_place || p.soe_extended?.native_place },
+  "出生地点": { path: "identity.birth_place", value: (p) => p.identity?.birth_place || p.soe_extended?.native_place },
+  "证件有效期": { path: "identity.id_expiry_date", value: (p) => p.identity?.id_expiry_date },
+  "身份证有效期": { path: "identity.id_expiry_date", value: (p) => p.identity?.id_expiry_date },
   "健康状况": { path: "identity.health_status", value: (p) => p.identity?.health_status },
   "健康状态": { path: "identity.health_status", value: (p) => p.identity?.health_status },
   "婚姻状况": { path: "identity.marital_status", value: (p) => p.identity?.marital_status },
+  "婚姻状态": { path: "identity.marital_status", value: (p) => p.identity?.marital_status },
   "手机号": { path: "contact.mobile", value: (p) => p.contact?.mobile },
   "手机号码": { path: "contact.mobile", value: (p) => p.contact?.mobile },
   "手机": { path: "contact.mobile", value: (p) => p.contact?.mobile },
@@ -81,6 +85,17 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "现居城市": { path: "contact.current_city", value: (p) => p.contact?.current_city },
   "现居住地": { path: "contact.current_city", value: (p) => p.contact?.current_city },
   "现居地址": { path: "contact.current_address", value: (p) => p.contact?.current_address },
+  "紧急联系人": { path: "contact.emergency_contact_name", value: (p) => p.contact?.emergency_contact_name },
+  "紧急联系人姓名": { path: "contact.emergency_contact_name", value: (p) => p.contact?.emergency_contact_name },
+  "紧急联系人电话": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone },
+  "紧急联系人手机": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone },
+  "紧急联系人关系": { path: "contact.emergency_contact_relation", value: (p) => p.contact?.emergency_contact_relation },
+  "与紧急联系人关系": { path: "contact.emergency_contact_relation", value: (p) => p.contact?.emergency_contact_relation },
+  "家庭电话": { path: "contact.home_phone", value: (p) => p.contact?.home_phone },
+  "固定电话": { path: "contact.home_phone", value: (p) => p.contact?.home_phone },
+  "座机": { path: "contact.home_phone", value: (p) => p.contact?.home_phone },
+  "邮编": { path: "contact.postal_code", value: (p) => p.contact?.postal_code },
+  "邮政编码": { path: "contact.postal_code", value: (p) => p.contact?.postal_code },
   "国籍": { path: "identity.nationality", value: (p) => p.identity?.nationality },
   "国籍地区": { path: "identity.nationality", value: (p) => p.identity?.nationality },
   "QQ": { path: "contact.qq", value: (p) => p.contact?.qq },
@@ -88,7 +103,72 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "微信号": { path: "contact.wechat", value: (p) => p.contact?.wechat },
   "籍贯": { path: "soe_extended.native_place", value: (p) => p.soe_extended?.native_place },
   "户口所在地": { path: "soe_extended.household_registration", value: (p) => p.soe_extended?.household_registration },
+  "户籍所在地": { path: "soe_extended.household_registration", value: (p) => p.soe_extended?.household_registration },
+  "户籍地址": { path: "soe_extended.household_registration", value: (p) => p.soe_extended?.household_registration },
+  "户口类型": { path: "soe_extended.household_type", value: (p) => p.soe_extended?.household_type },
+  "户口性质": { path: "soe_extended.household_type", value: (p) => p.soe_extended?.household_type },
   "政治面貌": { path: "soe_extended.political_status", value: (p) => p.soe_extended?.political_status },
+  "入党时间": { path: "soe_extended.join_party_date", value: (p) => display(p.soe_extended?.join_party_date) },
+  "入团时间": { path: "soe_extended.join_party_date", value: (p) => display(p.soe_extended?.join_party_date) },
+  "身高": { path: "soe_extended.height_cm", value: (p) => p.soe_extended?.height_cm },
+  "体重": { path: "soe_extended.weight_kg", value: (p) => p.soe_extended?.weight_kg },
+  "血型": { path: "soe_extended.blood_type", value: (p) => p.soe_extended?.blood_type },
+  "左眼视力": { path: "soe_extended.eyesight_left", value: (p) => p.soe_extended?.eyesight_left },
+  "右眼视力": { path: "soe_extended.eyesight_right", value: (p) => p.soe_extended?.eyesight_right },
+  "犯罪记录": { path: "soe_extended.has_criminal_record", value: (p) => p.soe_extended?.has_criminal_record },
+  "有无犯罪记录": { path: "soe_extended.has_criminal_record", value: (p) => p.soe_extended?.has_criminal_record },
+  "处分记录": { path: "soe_extended.has_disciplinary_record", value: (p) => p.soe_extended?.has_disciplinary_record },
+  "有无处分": { path: "soe_extended.has_disciplinary_record", value: (p) => p.soe_extended?.has_disciplinary_record },
+  "是否服从分配": { path: "soe_extended.can_relocate", value: (p) => p.soe_extended?.can_relocate },
+  "是否服从调剂": { path: "soe_extended.can_relocate", value: (p) => p.soe_extended?.can_relocate },
+  "服从调剂": { path: "soe_extended.can_relocate", value: (p) => p.soe_extended?.can_relocate },
+  "服从分配": { path: "soe_extended.can_relocate", value: (p) => p.soe_extended?.can_relocate },
+  "期望薪资": { path: "soe_extended.expected_salary", value: (p) => p.soe_extended?.expected_salary },
+  "期望月薪": { path: "soe_extended.expected_salary", value: (p) => p.soe_extended?.expected_salary },
+  "期望年薪": { path: "soe_extended.expected_salary", value: (p) => p.soe_extended?.expected_salary },
+  "最早到岗": { path: "soe_extended.available_date", value: (p) => display(p.soe_extended?.available_date) },
+  "到岗时间": { path: "soe_extended.available_date", value: (p) => display(p.soe_extended?.available_date) },
+  "最早到岗时间": { path: "soe_extended.available_date", value: (p) => display(p.soe_extended?.available_date) },
+  "推荐人": { path: "soe_extended.referrer_name", value: (p) => p.soe_extended?.referrer_name },
+  "推荐人姓名": { path: "soe_extended.referrer_name", value: (p) => p.soe_extended?.referrer_name },
+  "推荐人工号": { path: "soe_extended.referrer_employee_id", value: (p) => p.soe_extended?.referrer_employee_id },
+  "内推人": { path: "soe_extended.referrer_name", value: (p) => p.soe_extended?.referrer_name },
+  "内推工号": { path: "soe_extended.referrer_employee_id", value: (p) => p.soe_extended?.referrer_employee_id },
+  "自我评价": { path: "soe_extended.personal_statement", value: (p) => p.soe_extended?.personal_statement },
+  "个人陈述": { path: "soe_extended.personal_statement", value: (p) => p.soe_extended?.personal_statement },
+  "个人简介": { path: "soe_extended.personal_statement", value: (p) => p.soe_extended?.personal_statement },
+  "个人总结": { path: "soe_extended.personal_statement", value: (p) => p.soe_extended?.personal_statement },
+  "兴趣爱好": { path: "soe_extended.hobbies", value: (p) => p.soe_extended?.hobbies },
+  "爱好特长": { path: "soe_extended.hobbies", value: (p) => p.soe_extended?.hobbies },
+  "特长": { path: "soe_extended.strengths", value: (p) => p.soe_extended?.strengths },
+  "个人特长": { path: "soe_extended.strengths", value: (p) => p.soe_extended?.strengths },
+  "个人优势": { path: "soe_extended.strengths", value: (p) => p.soe_extended?.strengths },
+  "海外经历": { path: "soe_extended.has_overseas_background", value: (p) => p.soe_extended?.has_overseas_background },
+  "有无海外经历": { path: "soe_extended.has_overseas_background", value: (p) => p.soe_extended?.has_overseas_background },
+  "海外亲属": { path: "soe_extended.overseas_relatives", value: (p) => p.soe_extended?.overseas_relatives },
+  "有无海外亲属": { path: "soe_extended.overseas_relatives", value: (p) => p.soe_extended?.overseas_relatives },
+  "驾照": { path: "soe_extended.driving_license", value: (p) => p.soe_extended?.driving_license },
+  "驾驶证": { path: "soe_extended.driving_license", value: (p) => p.soe_extended?.driving_license },
+  "驾照类型": { path: "soe_extended.driving_license", value: (p) => p.soe_extended?.driving_license },
+  "计算机水平": { path: "soe_extended.computer_proficiency", value: (p) => p.soe_extended?.computer_proficiency },
+  "计算机等级": { path: "soe_extended.computer_proficiency", value: (p) => p.soe_extended?.computer_proficiency },
+  "普通话等级": { path: "soe_extended.mandarin_level", value: (p) => p.soe_extended?.mandarin_level },
+  "普通话水平": { path: "soe_extended.mandarin_level", value: (p) => p.soe_extended?.mandarin_level },
+  "毕业年份": { path: "campus_context.graduation_year", value: (p) => p.campus_context?.graduation_year },
+  "四级成绩": { path: "campus_context.cet4_score", value: (p) => p.campus_context?.cet4_score },
+  "六级成绩": { path: "campus_context.cet6_score", value: (p) => p.campus_context?.cet6_score },
+  "四级分数": { path: "campus_context.cet4_score", value: (p) => p.campus_context?.cet4_score },
+  "六级分数": { path: "campus_context.cet6_score", value: (p) => p.campus_context?.cet6_score },
+  "cet4": { path: "campus_context.cet4_score", value: (p) => p.campus_context?.cet4_score },
+  "cet6": { path: "campus_context.cet6_score", value: (p) => p.campus_context?.cet6_score },
+  "雅思": { path: "campus_context.ielts_score", value: (p) => p.campus_context?.ielts_score },
+  "雅思成绩": { path: "campus_context.ielts_score", value: (p) => p.campus_context?.ielts_score },
+  "托福": { path: "campus_context.toefl_score", value: (p) => p.campus_context?.toefl_score },
+  "托福成绩": { path: "campus_context.toefl_score", value: (p) => p.campus_context?.toefl_score },
+  "学生干部": { path: "campus_context.student_cadre", value: (p) => p.campus_context?.student_cadre },
+  "是否学生干部": { path: "campus_context.student_cadre", value: (p) => p.campus_context?.student_cadre },
+  "应届生": { path: "campus_context.is_fresh_graduate", value: (p) => p.campus_context?.is_fresh_graduate },
+  "是否应届毕业生": { path: "campus_context.is_fresh_graduate", value: (p) => p.campus_context?.is_fresh_graduate },
   "毕业院校": { path: "education[highest].school_name", value: (p) => highest(p.education)?.school_name },
   "学校名称": { path: "education[highest].school_name", value: (p) => highest(p.education)?.school_name },
   "专业": { path: "education[highest].major", value: (p) => highest(p.education)?.major },
@@ -110,6 +190,18 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "学院": { path: "education[highest].department", value: (p) => highest(p.education)?.department },
   "院系": { path: "education[highest].department", value: (p) => highest(p.education)?.department },
   "院系名称": { path: "education[highest].department", value: (p) => highest(p.education)?.department },
+  "绩点": { path: "education[highest].gpa", value: (p) => highest(p.education)?.gpa },
+  "gpa": { path: "education[highest].gpa", value: (p) => highest(p.education)?.gpa },
+  "成绩绩点": { path: "education[highest].gpa", value: (p) => highest(p.education)?.gpa },
+  "院校类型": { path: "education[highest].school_type", value: (p) => highest(p.education)?.school_type },
+  "院校性质": { path: "education[highest].school_type", value: (p) => highest(p.education)?.school_type },
+  "学校类型": { path: "education[highest].school_type", value: (p) => highest(p.education)?.school_type },
+  "学习方式": { path: "education[highest].study_mode", value: (p) => highest(p.education)?.study_mode },
+  "学习形式": { path: "education[highest].study_mode", value: (p) => highest(p.education)?.study_mode },
+  "培养方式": { path: "education[highest].study_mode", value: (p) => highest(p.education)?.study_mode },
+  "班级": { path: "education[highest].class_name", value: (p) => highest(p.education)?.class_name },
+  "所在班级": { path: "education[highest].class_name", value: (p) => highest(p.education)?.class_name },
+  "学号": { path: "education[highest].student_id", value: (p) => highest(p.education)?.student_id },
 };
 
 const experienceAliases: Record<string, { path: string; value: (profile: CandidateProfile) => unknown }> = {
@@ -293,7 +385,7 @@ function findKey(field: PageField, rules: Record<string, unknown>) {
   return Object.keys(rules).find((key) => value === normalize(key) || value.includes(normalize(key))) || "";
 }
 
-function fieldRule(field: PageField, section?: string): { rule: { path: string; value: (profile: CandidateProfile) => unknown }; source: MappingSource } | undefined {
+function fieldRule(field: PageField, section?: string, profile?: CandidateProfile): { rule: { path: string; value: (profile: CandidateProfile) => unknown }; source: MappingSource } | undefined {
   const scope = field.section || section;
   if (scope === "实习经历") {
     const key = findKey(field, experienceAliases);
@@ -333,6 +425,24 @@ function fieldRule(field: PageField, section?: string): { rule: { path: string; 
   if (certificateKey) return { rule: certificateAliases[certificateKey], source: "certificate" };
   const practiceKey = findKey(field, practiceAliases);
   if (practiceKey) return { rule: practiceAliases[practiceKey], source: "practice" };
+
+  if (profile?.soe_extended?.custom_fields && typeof profile.soe_extended.custom_fields === "object") {
+    const customFields = profile.soe_extended.custom_fields as Record<string, unknown>;
+    const value = normalize(`${field.label}${field.name}`);
+    for (const [key, val] of Object.entries(customFields)) {
+      const normKey = normalize(key);
+      if (normKey && (value === normKey || value.includes(normKey))) {
+        return {
+          rule: {
+            path: `soe_extended.custom_fields["${key}"]`,
+            value: () => val,
+          },
+          source: "base",
+        };
+      }
+    }
+  }
+
   return undefined;
 }
 
@@ -359,7 +469,7 @@ export function mapFields(fields: PageField[], profile?: CandidateProfile, secti
   if (profile) {
     fields.forEach((field) => {
       if (!field.value.trim()) return;
-      const selected = fieldRule(field, section);
+      const selected = fieldRule(field, section, profile);
       if (!selected || selected.source !== "experience" || !/\.(org_name|title)$/.test(selected.rule.path)) return;
       const wanted = field.value.trim().toLowerCase();
       const index = experienceRecords(profile.experiences).findIndex((record) => [record.org_name, record.title].some((value) => String(value || "").trim().toLowerCase() === wanted));
@@ -379,7 +489,7 @@ export function mapFields(fields: PageField[], profile?: CandidateProfile, secti
     if (field.value.trim()) return { field, decision: "skip", reason: "已有内容，已保留" };
     if (!field.required) return { field, decision: "skip", reason: "选填项，按要求留空" };
     if (!profile) return { field, decision: "review", reason: "请先导入候选人资料" };
-    const selected = fieldRule(field, section);
+    const selected = fieldRule(field, section, profile);
     if (!selected) return { field, decision: "review", reason: "没有唯一的字段规则，请手动选择资料" };
     const slotKey = selected.source === "base" ? "" : `${selected.source}:${selected.rule.path.match(/\.(\w+)$/)?.[1] || selected.rule.path}`;
     const index = slotKey ? occurrences[slotKey] || 0 : undefined;
