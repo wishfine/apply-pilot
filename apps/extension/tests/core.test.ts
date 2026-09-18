@@ -160,4 +160,165 @@ describe("extension field planning", () => {
     ]);
     expect(plan.every((item) => item.decision === "fill")).toBe(true);
   });
+
+  it("strictly isolates emergency contact name from candidate identity name", () => {
+    const candidateProfile = {
+      ...profile,
+      identity: { ...profile.identity, name: "金泽凯" },
+      contact: {
+        ...profile.contact,
+        mobile: "13800138000",
+        emergency_contact_name: "张父",
+        emergency_contact_phone: "13900139000",
+        emergency_contact_relation: "父亲",
+      },
+    };
+
+    const plan = mapFields([
+      field("姓名"),
+      field("紧急联系人姓名"),
+      field("紧急联系人电话"),
+      field("紧急联系人手机"),
+      field("紧急联系人关系"),
+    ], candidateProfile);
+
+    expect(plan[0].proposedValue).toBe("金泽凯");
+    expect(plan[0].profilePath).toBe("identity.name");
+
+    // Must NEVER be candidate's name!
+    expect(plan[1].proposedValue).toBe("张父");
+    expect(plan[1].profilePath).toBe("contact.emergency_contact_name");
+
+    expect(plan[2].proposedValue).toBe("13900139000");
+    expect(plan[2].profilePath).toBe("contact.emergency_contact_phone");
+
+    expect(plan[3].proposedValue).toBe("13900139000");
+    expect(plan[3].profilePath).toBe("contact.emergency_contact_phone");
+
+    expect(plan[4].proposedValue).toBe("父亲");
+    expect(plan[4].profilePath).toBe("contact.emergency_contact_relation");
+  });
+
+  it("matches political status dropdown options to full names when available", () => {
+    const candidateProfile = {
+      ...profile,
+      soe_extended: {
+        political_status: "共青团员",
+      },
+    };
+
+    const selectField: PageField = {
+      ref: "political-select",
+      label: "政治面貌",
+      name: "politicalStatus",
+      kind: "select",
+      required: true,
+      value: "",
+      options: [
+        "--请选择--",
+        "中国共产党党员",
+        "中国共产党预备党员",
+        "中国共产主义青年团团员",
+        "群众",
+      ],
+    };
+
+    const plan = mapFields([selectField], candidateProfile);
+    expect(plan[0].decision).toBe("fill");
+    expect(plan[0].proposedValue).toBe("中国共产主义青年团团员");
+  });
+
+  it("handles compound fields for ID number and mobile country code", () => {
+    const candidateProfile = {
+      ...profile,
+      identity: {
+        ...profile.identity,
+        id_type: "身份证",
+        id_number: "110101199003072345",
+      },
+      contact: {
+        ...profile.contact,
+        mobile: "13800138000",
+      },
+    };
+
+    const idTypeSelect: PageField = {
+      ref: "id-type",
+      label: "身份证号",
+      name: "idType",
+      kind: "select",
+      required: true,
+      value: "",
+      options: ["国内身份证或护照（含港澳台）", "国外身份证"],
+    };
+    const idNumberText: PageField = {
+      ref: "id-number",
+      label: "身份证号",
+      name: "idNumber",
+      kind: "text",
+      required: true,
+      value: "",
+      options: [],
+    };
+    const countryCodeSelect: PageField = {
+      ref: "country-code",
+      label: "手机号码",
+      name: "countryCode",
+      kind: "select",
+      required: true,
+      value: "",
+      options: ["中国大陆（+86）", "其他地区手机号"],
+    };
+    const mobileText: PageField = {
+      ref: "mobile-input",
+      label: "手机号码",
+      name: "mobile",
+      kind: "text",
+      required: true,
+      value: "",
+      options: [],
+    };
+
+    const plan = mapFields([idTypeSelect, idNumberText, countryCodeSelect, mobileText], candidateProfile);
+    expect(plan.map((item) => item.proposedValue)).toEqual([
+      "国内身份证或护照（含港澳台）",
+      "110101199003072345",
+      "中国大陆（+86）",
+      "13800138000",
+    ]);
+  });
+
+  it("maps cascading selects for native place location", () => {
+    const candidateProfile = {
+      ...profile,
+      soe_extended: {
+        native_place: "北京市东城区",
+      },
+    };
+
+    const provSelect: PageField = {
+      ref: "prov",
+      label: "籍贯",
+      name: "prov",
+      kind: "select",
+      required: true,
+      value: "",
+      options: ["北京", "天津", "河北", "湖北"],
+    };
+    const citySelect: PageField = {
+      ref: "city",
+      label: "籍贯",
+      name: "city",
+      kind: "select",
+      required: true,
+      value: "",
+      options: ["北京市东城区", "北京市西城区", "北京市海淀区"],
+    };
+
+    const plan = mapFields([provSelect, citySelect], candidateProfile);
+    expect(plan.map((item) => item.proposedValue)).toEqual([
+      "北京",
+      "北京市东城区",
+    ]);
+  });
 });

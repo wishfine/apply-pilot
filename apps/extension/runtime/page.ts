@@ -152,12 +152,33 @@ export function scanPage(): PageScan {
     else if (element instanceof HTMLTextAreaElement || element.getAttribute("contenteditable") === "true" || ["textbox", "combobox"].includes(element.getAttribute("role") || "")) kind = "textarea";
     else if (["text", "email", "tel", "number", "url", "date", "month", "time", "datetime-local"].includes(type)) kind = "text";
     if (kind === "unsupported") continue;
+
+    // Disambiguate compound fields and cascading selects within the same container
+    let finalLabel = label;
+    if (kind === "select") {
+      const normL = clean(label).replace(/[*＊:：\s]/g, "");
+      const hostContainer = element.closest("tr, td, label, .form-item, .form-group, .field, [class*='field'], [class*='form'], [class*='row'], .row");
+      if (hostContainer) {
+        const siblingSelects = Array.from(hostContainer.querySelectorAll("select")).filter(visible);
+        if (/身份证|证件号|证件号码/.test(normL) && !/类型|种类/.test(normL)) {
+          finalLabel = "证件类型";
+        } else if (/手机|移动电话/.test(normL) && !/区号|国家|地区/.test(normL)) {
+          finalLabel = "手机区号";
+        } else if (siblingSelects.length > 1 && /籍贯|户籍|户口|居住|现居|常住|地址/.test(normL)) {
+          const selectIndex = siblingSelects.indexOf(element as HTMLSelectElement);
+          if (selectIndex === 0) finalLabel = `${normL}省份`;
+          else if (selectIndex === 1) finalLabel = `${normL}城市`;
+          else if (selectIndex === 2) finalLabel = `${normL}区县`;
+        }
+      }
+    }
+
     const ref = `ap-${sequence++}`;
     element.setAttribute("data-applypilot-ref", ref);
     const options = element instanceof HTMLSelectElement ? Array.from(element.options).filter((option) => !option.disabled && clean(option.textContent)).map((option) => clean(option.textContent)) : [];
     const value = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement ? control.value : clean(element.textContent);
     const section = sectionFor(element);
-    fields.push({ ref, label, name: clean(control.name || element.id || hint), type, kind, required, value, options, section, recordGroup: recordGroupFor(element, section) });
+    fields.push({ ref, label: finalLabel, name: clean(control.name || element.id || hint), type, kind, required, value, options, section, recordGroup: recordGroupFor(element, section) });
   }
   const sections: PageSection[] = [];
   const sectionCandidates = document.querySelectorAll("a, button, [role='tab'], [role='menuitem'], [class*='menu-item'], [class*='nav-item'], [class*='side-item']");
@@ -202,11 +223,106 @@ export function fillField(ref: string, value: string): FillReceipt {
   };
   try {
     if (element instanceof HTMLSelectElement) {
-      const wanted = expected.trim().toLowerCase();
+      const wanted = expected.trim();
       const options = Array.from(element.options).filter((option) => !option.disabled);
-      const option = options.find((candidate) => candidate.text.trim().toLowerCase() === wanted) || options.find((candidate) => candidate.text.trim().toLowerCase().includes(wanted) || wanted.includes(candidate.text.trim().toLowerCase()));
-      if (!option) return { ok: false, message: `没有匹配的选项：${expected}` };
-      element.value = option.value;
+
+      const norm = (str: string) => (str || "").replace(/[\s:*：\/／,，.。·()（）【】\[\]_-]/g, "").toLowerCase();
+      const normWanted = norm(wanted);
+
+      const validOptions = options.filter((opt) => {
+        const n = norm(opt.text);
+        return n && !/^(请选择|--请选择--|选择|未选择|select)$/i.test(n);
+      });
+      const candidates = validOptions.length ? validOptions : options;
+
+      // 1. Exact match (by text or value)
+      let matchedOption = candidates.find((c) => norm(c.text) === normWanted || c.value.trim().toLowerCase() === wanted.toLowerCase());
+
+      // 2. Synonym groups lookup
+      if (!matchedOption) {
+        const SYNONYMS = [
+          ["中国共产党党员", "中共党员", "党员"],
+          ["中国共产党预备党员", "中共预备党员", "预备党员"],
+          ["中国共产主义青年团团员", "共青团员", "共青团", "中国共青团员", "青年团团员", "团员"],
+          ["群众", "普通群众"],
+          ["无党派民主人士", "无党派人士", "无党派"],
+          ["中国国民党革命委员会会员", "民革会员", "民革党员", "民革"],
+          ["中国民主同盟盟员", "民盟盟员", "民盟"],
+          ["中国民主建国会会员", "民建会员", "民建"],
+          ["中国民主促进会会员", "民进会员", "民进"],
+          ["中国农工民主党党员", "农工党党员", "农工党"],
+          ["中国致公党党员", "致公党党员", "致公党"],
+          ["九三学社社员", "九三学社"],
+          ["台湾民主自治同盟盟员", "台盟盟员", "台盟"],
+          ["国内身份证或护照（含港澳台）", "居民身份证", "中华人民共和国居民身份证", "二代居民身份证", "二代身份证", "身份证", "国内身份证", "大陆居民身份证", "国内身份证或护照"],
+          ["国外身份证", "外籍身份证", "外籍证件"],
+          ["护照", "中国护照", "因私普通护照", "外国护照"],
+          ["港澳居民来往内地通行证", "港澳通行证", "回乡证"],
+          ["台湾居民来往大陆通行证", "台胞证"],
+          ["中国大陆（+86）", "中国大陆(+86)", "+86", "86", "中国大陆", "中国(+86)", "+86(中国大陆)", "+86中国大陆", "中国"],
+          ["其他地区手机号", "其他地区", "境外手机号", "其他国家或地区", "其他"],
+          ["博士研究生", "博士", "doctor", "博士生"],
+          ["硕士研究生", "硕士", "master", "研究生", "硕士生"],
+          ["大学本科", "本科", "bachelor", "普通本科", "全日制本科", "本科生"],
+          ["大学专科", "专科", "大专", "associate", "高职", "专科(高职)"],
+          ["普通高中", "高中", "high_school", "中专"],
+          ["是", "yes", "true", "1", "有", "服从", "同意", "参加", "合格", "已通过"],
+          ["否", "no", "false", "0", "无", "不服从", "不同意", "未参加", "不合格", "未通过"],
+          ["未婚", "未婚/single", "single"],
+          ["已婚", "已婚/married", "married"],
+          ["离异", "离异/divorced", "divorced"],
+          ["男", "男性", "male"],
+          ["女", "女性", "female"],
+          ["城镇居民", "城镇", "城镇户口", "城市居民", "非农业户口", "非农"],
+          ["农村居民", "农村", "农村户口", "农业户口", "农业"]
+        ];
+        for (const group of SYNONYMS) {
+          const inGroup = group.some((item) => norm(item) === normWanted || normWanted.includes(norm(item)) || norm(item).includes(normWanted));
+          if (inGroup) {
+            for (const item of group) {
+              const normItem = norm(item);
+              const found = candidates.find((c) => {
+                const normText = norm(c.text);
+                return normText === normItem || normText.includes(normItem) || normItem.includes(normText);
+              });
+              if (found) {
+                matchedOption = found;
+                break;
+              }
+            }
+            if (matchedOption) break;
+          }
+        }
+      }
+
+      // 3. Location partial match (e.g. wanted is "湖北省武汉市", option is "湖北" or "武汉市")
+      if (!matchedOption) {
+        const PROVINCES = ["北京", "天津", "河北", "山西", "内蒙古", "辽宁", "吉林", "黑龙江", "上海", "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南", "湖北", "湖南", "广东", "广西", "海南", "重庆", "四川", "贵州", "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆", "香港", "澳门", "台湾"];
+        for (const prov of PROVINCES) {
+          if (wanted.startsWith(prov)) {
+            const provMatch = candidates.find((c) => {
+              const n = norm(c.text);
+              return n === prov || n === `${prov}省` || n === `${prov}市` || (n.length >= 2 && prov.includes(n));
+            });
+            if (provMatch) {
+              matchedOption = provMatch;
+              break;
+            }
+          }
+        }
+      }
+
+      // 4. Substring / inclusion match (longest option match first)
+      if (!matchedOption) {
+        const sorted = [...candidates].sort((a, b) => b.text.length - a.text.length);
+        matchedOption = sorted.find((c) => {
+          const normText = norm(c.text);
+          return normText.length >= 2 && (normWanted.includes(normText) || normText.includes(normWanted));
+        });
+      }
+
+      if (!matchedOption) return { ok: false, message: `没有匹配的选项：${expected}` };
+      element.value = matchedOption.value;
       dispatch();
     } else if (element instanceof HTMLInputElement && element.type === "file") {
       return { ok: false, message: "附件请在页面中手动选择文件" };

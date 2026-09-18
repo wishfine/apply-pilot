@@ -57,13 +57,183 @@ export function parseCandidateProfile(input: unknown): CandidateProfile {
   return profile as CandidateProfile;
 }
 
+export type LocationComponents = {
+  province: string;
+  city: string;
+  district: string;
+};
+
+const PROVINCE_NAMES = [
+  "北京", "天津", "河北", "山西", "内蒙古", "辽宁", "吉林", "黑龙江",
+  "上海", "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南",
+  "湖北", "湖南", "广东", "广西", "海南", "重庆", "四川", "贵州",
+  "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆", "香港", "澳门", "台湾"
+];
+
+export function extractLocationComponents(rawAddress: unknown): LocationComponents {
+  const str = String(rawAddress || "").trim();
+  if (!str) return { province: "", city: "", district: "" };
+
+  let province = "";
+  let remaining = str;
+
+  for (const prov of PROVINCE_NAMES) {
+    if (str.startsWith(prov)) {
+      province = prov;
+      const match = str.match(new RegExp(`^${prov}(?:省|市|自治区|特别行政区|壮族自治区|回族自治区|维吾尔自治区)?`));
+      if (match) {
+        remaining = str.slice(match[0].length).trim();
+      }
+      break;
+    }
+  }
+
+  const isMunicipality = ["北京", "天津", "上海", "重庆"].includes(province);
+  let city = "";
+  let district = "";
+
+  if (isMunicipality) {
+    province = `${province}市`;
+    city = remaining ? `${province}${remaining}` : province;
+    district = remaining || province;
+  } else {
+    const cityMatch = remaining.match(/^(.+?(?:市|自治州|地区|盟|州))/);
+    if (cityMatch) {
+      city = cityMatch[1];
+      district = remaining.slice(cityMatch[0].length).trim() || city;
+    } else {
+      city = remaining || province;
+      district = city;
+    }
+    if (province && !province.endsWith("省") && !province.endsWith("自治区")) {
+      province = `${province}省`;
+    }
+  }
+
+  return { province: province || str, city: city || str, district: district || city || str };
+}
+
+export const SYNONYM_GROUPS: string[][] = [
+  // 政治面貌
+  ["中国共产党党员", "中共党员", "党员"],
+  ["中国共产党预备党员", "中共预备党员", "预备党员"],
+  ["中国共产主义青年团团员", "共青团员", "共青团", "中国共青团员", "青年团团员", "团员"],
+  ["群众", "普通群众"],
+  ["无党派民主人士", "无党派人士", "无党派"],
+  ["中国国民党革命委员会会员", "民革会员", "民革党员", "民革"],
+  ["中国民主同盟盟员", "民盟盟员", "民盟"],
+  ["中国民主建国会会员", "民建会员", "民建"],
+  ["中国民主促进会会员", "民进会员", "民进"],
+  ["中国农工民主党党员", "农工党党员", "农工党"],
+  ["中国致公党党员", "致公党党员", "致公党"],
+  ["九三学社社员", "九三学社"],
+  ["台湾民主自治同盟盟员", "台盟盟员", "台盟"],
+
+  // 证件类型
+  ["国内身份证或护照（含港澳台）", "居民身份证", "中华人民共和国居民身份证", "二代居民身份证", "二代身份证", "身份证", "国内身份证", "大陆居民身份证", "国内身份证或护照"],
+  ["国外身份证", "外籍身份证", "外籍证件"],
+  ["护照", "中国护照", "因私普通护照", "外国护照"],
+  ["港澳居民来往内地通行证", "港澳通行证", "回乡证"],
+  ["台湾居民来往大陆通行证", "台胞证"],
+
+  // 手机国家代码/区号
+  ["中国大陆（+86）", "中国大陆(+86)", "+86", "86", "中国大陆", "中国(+86)", "+86(中国大陆)", "+86中国大陆", "中国"],
+  ["其他地区手机号", "其他地区", "境外手机号", "其他国家或地区", "其他"],
+
+  // 学历层次
+  ["博士研究生", "博士", "doctor", "博士生"],
+  ["硕士研究生", "硕士", "master", "研究生", "硕士生"],
+  ["大学本科", "本科", "bachelor", "普通本科", "全日制本科", "本科生"],
+  ["大学专科", "专科", "大专", "associate", "高职", "专科(高职)"],
+  ["普通高中", "高中", "high_school", "中专"],
+
+  // 是否 / 调剂 / 处分 / 犯罪
+  ["是", "yes", "true", "1", "有", "服从", "同意", "参加", "合格", "已通过"],
+  ["否", "no", "false", "0", "无", "不服从", "不同意", "未参加", "不合格", "未通过"],
+
+  // 婚姻状况
+  ["未婚", "未婚/single", "single"],
+  ["已婚", "已婚/married", "married"],
+  ["离异", "离异/divorced", "divorced"],
+
+  // 性别
+  ["男", "男性", "male"],
+  ["女", "女性", "female"],
+
+  // 户口性质
+  ["城镇居民", "城镇", "城镇户口", "城市居民", "非农业户口", "非农"],
+  ["农村居民", "农村", "农村户口", "农业户口", "农业"]
+];
+
+export function matchOptionText(options: string[], targetValue: unknown): string | undefined {
+  if (!options || options.length === 0 || targetValue === undefined || targetValue === null) return undefined;
+  const rawTarget = String(targetValue).trim();
+  if (!rawTarget) return undefined;
+  const normTarget = normalize(rawTarget);
+
+  const validOptions = options.filter((opt) => {
+    const norm = normalize(opt);
+    return norm && !/^(请选择|--请选择--|选择|未选择|select)$/i.test(norm);
+  });
+  if (validOptions.length === 0) return undefined;
+
+  // 1. Exact normalized match
+  const exact = validOptions.find((opt) => normalize(opt) === normTarget);
+  if (exact) return exact;
+
+  // 2. Synonym groups lookup
+  for (const group of SYNONYM_GROUPS) {
+    const targetInGroup = group.some((item) => normalize(item) === normTarget || normTarget.includes(normalize(item)) || normalize(item).includes(normTarget));
+    if (targetInGroup) {
+      for (const item of group) {
+        const normItem = normalize(item);
+        const matched = validOptions.find((opt) => {
+          const normOpt = normalize(opt);
+          return normOpt === normItem || normOpt.includes(normItem) || normItem.includes(normOpt);
+        });
+        if (matched) return matched;
+      }
+    }
+  }
+
+  // 3. Location matching: check if target is location and option is province/city
+  const loc = extractLocationComponents(rawTarget);
+  if (loc.province) {
+    const provShort = loc.province.replace(/省|市|自治区|特别行政区/g, "");
+    const provMatch = validOptions.find((opt) => {
+      const normOpt = normalize(opt);
+      return normOpt === normalize(loc.province) || (provShort.length >= 2 && normOpt === provShort) || (normOpt.length >= 2 && loc.province.includes(normOpt));
+    });
+    if (provMatch) return provMatch;
+  }
+  if (loc.city) {
+    const cityShort = loc.city.replace(/市|区|地区/g, "");
+    const cityMatch = validOptions.find((opt) => {
+      const normOpt = normalize(opt);
+      return normOpt === normalize(loc.city) || (cityShort.length >= 2 && normOpt.includes(cityShort)) || (normOpt.length >= 2 && loc.city.includes(normOpt));
+    });
+    if (cityMatch) return cityMatch;
+  }
+
+  // 4. Substring inclusion match (longer options preferred)
+  const sorted = [...validOptions].sort((a, b) => b.length - a.length);
+  const inclusion = sorted.find((opt) => {
+    const normOpt = normalize(opt);
+    return normOpt.length >= 2 && (normTarget.includes(normOpt) || normOpt.includes(normTarget));
+  });
+  if (inclusion) return inclusion;
+
+  return undefined;
+}
+
 const aliases: Record<string, { path: string; value: (profile: CandidateProfile) => unknown }> = {
   "姓名": { path: "identity.name", value: (p) => p.identity?.name },
   "真实姓名": { path: "identity.name", value: (p) => p.identity?.name },
   "英文名": { path: "identity.english_name", value: (p) => p.identity?.english_name },
   "性别": { path: "identity.gender", value: (p) => p.identity?.gender },
   "民族": { path: "identity.ethnicity", value: (p) => p.identity?.ethnicity },
-  "证件类型": { path: "identity.id_type", value: (p) => p.identity?.id_type },
+  "证件类型": { path: "identity.id_type", value: (p) => p.identity?.id_type || "国内身份证或护照（含港澳台）" },
+  "证件种类": { path: "identity.id_type", value: (p) => p.identity?.id_type || "国内身份证或护照（含港澳台）" },
   "身份证号": { path: "identity.id_number", value: (p) => p.identity?.id_number },
   "身份证": { path: "identity.id_number", value: (p) => p.identity?.id_number },
   "证件号码": { path: "identity.id_number", value: (p) => p.identity?.id_number },
@@ -80,11 +250,19 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "手机号": { path: "contact.mobile", value: (p) => p.contact?.mobile },
   "手机号码": { path: "contact.mobile", value: (p) => p.contact?.mobile },
   "手机": { path: "contact.mobile", value: (p) => p.contact?.mobile },
+  "手机区号": { path: "contact.mobile_country_code", value: () => "中国大陆（+86）" },
+  "国际区号": { path: "contact.mobile_country_code", value: () => "中国大陆（+86）" },
+  "国家代码": { path: "contact.mobile_country_code", value: () => "中国大陆（+86）" },
+  "区号": { path: "contact.mobile_country_code", value: () => "中国大陆（+86）" },
   "电子邮箱": { path: "contact.email", value: (p) => p.contact?.email },
   "邮箱": { path: "contact.email", value: (p) => p.contact?.email },
   "现居城市": { path: "contact.current_city", value: (p) => p.contact?.current_city },
   "现居住地": { path: "contact.current_city", value: (p) => p.contact?.current_city },
   "现居地址": { path: "contact.current_address", value: (p) => p.contact?.current_address },
+  "现居住地省份": { path: "contact.current_city[province]", value: (p) => extractLocationComponents(p.contact?.current_city || p.contact?.current_address).province },
+  "现居住地城市": { path: "contact.current_city[city]", value: (p) => extractLocationComponents(p.contact?.current_city || p.contact?.current_address).city },
+  "现居住地(省)": { path: "contact.current_city[province]", value: (p) => extractLocationComponents(p.contact?.current_city || p.contact?.current_address).province },
+  "现居住地(市)": { path: "contact.current_city[city]", value: (p) => extractLocationComponents(p.contact?.current_city || p.contact?.current_address).city },
   "紧急联系人": { path: "contact.emergency_contact_name", value: (p) => p.contact?.emergency_contact_name },
   "紧急联系人姓名": { path: "contact.emergency_contact_name", value: (p) => p.contact?.emergency_contact_name },
   "紧急联系人电话": { path: "contact.emergency_contact_phone", value: (p) => p.contact?.emergency_contact_phone },
@@ -102,9 +280,23 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "微信": { path: "contact.wechat", value: (p) => p.contact?.wechat },
   "微信号": { path: "contact.wechat", value: (p) => p.contact?.wechat },
   "籍贯": { path: "soe_extended.native_place", value: (p) => p.soe_extended?.native_place },
+  "籍贯所在地": { path: "soe_extended.native_place", value: (p) => p.soe_extended?.native_place },
+  "籍贯省份": { path: "soe_extended.native_place[province]", value: (p) => extractLocationComponents(p.soe_extended?.native_place).province },
+  "籍贯城市": { path: "soe_extended.native_place[city]", value: (p) => extractLocationComponents(p.soe_extended?.native_place).city },
+  "籍贯区县": { path: "soe_extended.native_place[district]", value: (p) => extractLocationComponents(p.soe_extended?.native_place).district },
+  "籍贯(省)": { path: "soe_extended.native_place[province]", value: (p) => extractLocationComponents(p.soe_extended?.native_place).province },
+  "籍贯(市)": { path: "soe_extended.native_place[city]", value: (p) => extractLocationComponents(p.soe_extended?.native_place).city },
+  "籍贯(区/县)": { path: "soe_extended.native_place[district]", value: (p) => extractLocationComponents(p.soe_extended?.native_place).district },
   "户口所在地": { path: "soe_extended.household_registration", value: (p) => p.soe_extended?.household_registration },
   "户籍所在地": { path: "soe_extended.household_registration", value: (p) => p.soe_extended?.household_registration },
   "户籍地址": { path: "soe_extended.household_registration", value: (p) => p.soe_extended?.household_registration },
+  "户籍省份": { path: "soe_extended.household_registration[province]", value: (p) => extractLocationComponents(p.soe_extended?.household_registration).province },
+  "户籍城市": { path: "soe_extended.household_registration[city]", value: (p) => extractLocationComponents(p.soe_extended?.household_registration).city },
+  "户籍区县": { path: "soe_extended.household_registration[district]", value: (p) => extractLocationComponents(p.soe_extended?.household_registration).district },
+  "户籍所在地省份": { path: "soe_extended.household_registration[province]", value: (p) => extractLocationComponents(p.soe_extended?.household_registration).province },
+  "户籍所在地城市": { path: "soe_extended.household_registration[city]", value: (p) => extractLocationComponents(p.soe_extended?.household_registration).city },
+  "户籍所在地(省)": { path: "soe_extended.household_registration[province]", value: (p) => extractLocationComponents(p.soe_extended?.household_registration).province },
+  "户籍所在地(市)": { path: "soe_extended.household_registration[city]", value: (p) => extractLocationComponents(p.soe_extended?.household_registration).city },
   "户口类型": { path: "soe_extended.household_type", value: (p) => p.soe_extended?.household_type },
   "户口性质": { path: "soe_extended.household_type", value: (p) => p.soe_extended?.household_type },
   "政治面貌": { path: "soe_extended.political_status", value: (p) => p.soe_extended?.political_status },
@@ -381,8 +573,43 @@ function normalize(value: string) {
 }
 
 function findKey(field: PageField, rules: Record<string, unknown>) {
-  const value = normalize(`${field.label}${field.name}`);
-  return Object.keys(rules).find((key) => value === normalize(key) || value.includes(normalize(key))) || "";
+  const normLabel = normalize(field.label);
+  const fullValue = normalize(`${field.label}${field.name}`);
+
+  // 1. Exact match on field.label first
+  const exactLabelKey = Object.keys(rules).find((key) => normalize(key) === normLabel);
+  if (exactLabelKey) return exactLabelKey;
+
+  // 2. Exact match on fullValue
+  const exactFullKey = Object.keys(rules).find((key) => normalize(key) === fullValue);
+  if (exactFullKey) return exactFullKey;
+
+  // 3. Guardrail against third-party / relation fields matching candidate identity
+  const isEmergency = fullValue.includes("紧急");
+  const isReferrer = fullValue.includes("推荐") || fullValue.includes("内推");
+  const isFamily = fullValue.includes("父亲") || fullValue.includes("母亲") || fullValue.includes("配偶") || fullValue.includes("子女") || fullValue.includes("家属");
+  const isSupervisor = fullValue.includes("证明人") || fullValue.includes("导师") || fullValue.includes("领导");
+
+  // 4. Find all candidate keys that are substrings of fullValue
+  const candidateKeys = Object.keys(rules).filter((key) => {
+    const normK = normalize(key);
+    if (normK.length < 2) return false;
+    if (!fullValue.includes(normK)) return false;
+
+    // Guardrail filtering: emergency contact cannot match general name/phone
+    if (isEmergency && !normK.includes("紧急")) return false;
+    if (isReferrer && !normK.includes("推荐") && !normK.includes("内推")) return false;
+    if (isFamily && !normK.includes("父") && !normK.includes("母") && !normK.includes("配偶") && !normK.includes("子女")) return false;
+    if (isSupervisor) return false;
+
+    return true;
+  });
+
+  if (candidateKeys.length === 0) return "";
+
+  // Sort by length descending (longest / most specific rule wins!)
+  candidateKeys.sort((a, b) => normalize(b).length - normalize(a).length);
+  return candidateKeys[0];
 }
 
 function fieldRule(field: PageField, section?: string, profile?: CandidateProfile): { rule: { path: string; value: (profile: CandidateProfile) => unknown }; source: MappingSource } | undefined {
@@ -496,12 +723,54 @@ export function mapFields(fields: PageField[], profile?: CandidateProfile, secti
     if (slotKey) occurrences[slotKey] = (index || 0) + 1;
     const recordIndex = index === undefined ? undefined : recordIndexFor(selected.source, index);
     const profilePath = pathForIndex(selected.rule.path, selected.source, recordIndex);
-    const value = recordIndex === undefined ? selected.rule.value(profile) : valueForRecord(selected.rule, profile, selected.source, recordIndex);
+    let value = recordIndex === undefined ? selected.rule.value(profile) : valueForRecord(selected.rule, profile, selected.source, recordIndex);
+
+    // Multi-select location cascade handling:
+    if (field.kind === "select" && (selected.rule.path === "soe_extended.native_place" || selected.rule.path.startsWith("soe_extended.native_place["))) {
+      const loc = extractLocationComponents(profile?.soe_extended?.native_place);
+      const locIndex = occurrences["cascade:native_place"] || 0;
+      occurrences["cascade:native_place"] = locIndex + 1;
+      if (locIndex === 0) value = loc.province;
+      else if (locIndex === 1) value = loc.city;
+      else value = loc.district;
+    } else if (field.kind === "select" && (selected.rule.path === "soe_extended.household_registration" || selected.rule.path.startsWith("soe_extended.household_registration["))) {
+      const loc = extractLocationComponents(profile?.soe_extended?.household_registration);
+      const locIndex = occurrences["cascade:household_registration"] || 0;
+      occurrences["cascade:household_registration"] = locIndex + 1;
+      if (locIndex === 0) value = loc.province;
+      else if (locIndex === 1) value = loc.city;
+      else value = loc.district;
+    } else if (field.kind === "select" && (selected.rule.path === "contact.current_city" || selected.rule.path.startsWith("contact.current_city["))) {
+      const loc = extractLocationComponents(profile?.contact?.current_city || profile?.contact?.current_address);
+      const locIndex = occurrences["cascade:current_city"] || 0;
+      occurrences["cascade:current_city"] = locIndex + 1;
+      if (locIndex === 0) value = loc.province;
+      else if (locIndex === 1) value = loc.city;
+      else value = loc.district;
+    }
+
+    // Compound fields: Select for ID number is actually ID type!
+    if (field.kind === "select" && profilePath === "identity.id_number") {
+      value = profile?.identity?.id_type || "国内身份证或护照（含港澳台）";
+    }
+    // Compound fields: Select for Mobile is actually country code!
+    if (field.kind === "select" && profilePath === "contact.mobile") {
+      value = "中国大陆（+86）";
+    }
+
     if (value === undefined || value === null || String(value).trim() === "") return { field, decision: "review", profilePath, reason: `资料缺少：${profilePath}` };
     if (field.kind === "choice") return { field, decision: "review", profilePath, proposedValue: String(value), reason: "选择控件需要确认具体选项" };
     if (field.kind === "file") return { field, decision: "review", profilePath, proposedValue: String(value), reason: "附件需要在浏览器中选择文件" };
-    const proposedValue = formatValue(profilePath, value);
+    let proposedValue = formatValue(profilePath, value);
     if (field.type === "date" && /^\d{4}-\d{2}$/.test(proposedValue)) return { field, decision: "review", profilePath, proposedValue, reason: "资料只有年月，日期控件需要完整日期" };
+
+    if (field.kind === "select" && field.options && field.options.length > 0) {
+      const matched = matchOptionText(field.options, proposedValue);
+      if (matched) {
+        proposedValue = matched;
+      }
+    }
+
     return { field, decision: "fill", profilePath, proposedValue, reason: `来源：${profilePath}` };
   });
 }

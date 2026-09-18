@@ -101,4 +101,92 @@ describe("page runtime", () => {
     document.body.innerHTML = `<div class="row"><span>项目名称</span><span>匹配规则：*</span><input aria-label="项目名称"></div>`;
     expect(scanPage().fields[0].required).toBe(false);
   });
+
+  it("fills select dropdowns using political status synonym matching", () => {
+    document.body.innerHTML = `
+      <form>
+        <label for="political">政治面貌</label>
+        <select id="political">
+          <option value="">--请选择--</option>
+          <option value="1">中国共产党党员</option>
+          <option value="2">中国共产党预备党员</option>
+          <option value="3">中国共产主义青年团团员</option>
+          <option value="4">群众</option>
+        </select>
+      </form>
+    `;
+    const scan = scanPage();
+    const receipt = fillField(scan.fields[0].ref, "共青团员");
+    expect(receipt.ok).toBe(true);
+    expect(document.querySelector<HTMLSelectElement>("#political")?.value).toBe("3");
+  });
+
+  it("disambiguates compound rows for ID number and mobile phone", () => {
+    document.body.innerHTML = `
+      <div class="form-item">
+        <label>* 身份证号</label>
+        <select id="id-type">
+          <option value="1">国内身份证或护照（含港澳台）</option>
+          <option value="2">国外身份证</option>
+        </select>
+        <input id="id-number" type="text" />
+      </div>
+      <div class="form-item">
+        <label>* 手机号码</label>
+        <select id="country-code">
+          <option value="86">中国大陆（+86）</option>
+          <option value="other">其他地区手机号</option>
+        </select>
+        <input id="mobile" type="text" />
+      </div>
+    `;
+    const scan = scanPage();
+    expect(scan.fields.map((f) => f.label)).toEqual([
+      "证件类型",
+      "* 身份证号",
+      "手机区号",
+      "* 手机号码",
+    ]);
+
+    // Test filling compound select and inputs
+    const fillType = fillField(scan.fields[0].ref, "居民身份证");
+    expect(fillType.ok).toBe(true);
+    expect(document.querySelector<HTMLSelectElement>("#id-type")?.value).toBe("1");
+
+    const fillId = fillField(scan.fields[1].ref, "110101199003072345");
+    expect(fillId.ok).toBe(true);
+    expect(document.querySelector<HTMLInputElement>("#id-number")?.value).toBe("110101199003072345");
+
+    const fillCode = fillField(scan.fields[2].ref, "+86");
+    expect(fillCode.ok).toBe(true);
+    expect(document.querySelector<HTMLSelectElement>("#country-code")?.value).toBe("86");
+  });
+
+  it("disambiguates cascading selects for location like native place", () => {
+    document.body.innerHTML = `
+      <div class="form-item">
+        <label>* 籍贯</label>
+        <select id="prov">
+          <option value="">--请选择--</option>
+          <option value="bj">北京</option>
+          <option value="hb">湖北</option>
+        </select>
+        <select id="city">
+          <option value="">--请选择--</option>
+          <option value="bj-dc">北京市东城区</option>
+          <option value="hb-wh">武汉市</option>
+        </select>
+      </div>
+    `;
+    const scan = scanPage();
+    expect(scan.fields.map((f) => f.label)).toEqual(["籍贯省份", "籍贯城市"]);
+
+    const fillProv = fillField(scan.fields[0].ref, "北京");
+    expect(fillProv.ok).toBe(true);
+    expect(document.querySelector<HTMLSelectElement>("#prov")?.value).toBe("bj");
+
+    const fillCity = fillField(scan.fields[1].ref, "北京市东城区");
+    expect(fillCity.ok).toBe(true);
+    expect(document.querySelector<HTMLSelectElement>("#city")?.value).toBe("bj-dc");
+  });
 });
