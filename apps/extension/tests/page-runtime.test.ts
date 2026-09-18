@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { fillField, scanPage } from "../runtime/page";
+import { fillField, installHarvestInterceptor, scanPage } from "../runtime/page";
 
 beforeEach(() => {
   Object.defineProperty(globalThis, "CSS", { value: { escape: (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "_") }, configurable: true });
@@ -274,4 +274,33 @@ describe("page runtime", () => {
     expect(fillMonth.ok).toBe(true);
     expect(document.querySelector<HTMLSelectElement>("#birth-month")?.value).toBe("05");
   });
+
+  it("intercepts next/submit click and renders harvest prompt modal when fields have values", () => {
+    document.body.innerHTML = `
+      <form>
+        <label for="f_name">姓名</label>
+        <input id="f_name" value="李四" />
+        <button type="button" id="btn-next">下一步</button>
+      </form>
+    `;
+
+    // Ensure flag is reset for test
+    delete (window as unknown as { __applypilot_interceptor_installed?: boolean }).__applypilot_interceptor_installed;
+
+    installHarvestInterceptor();
+
+    const nextBtn = document.querySelector<HTMLButtonElement>("#btn-next")!;
+    nextBtn.click();
+
+    const modal = document.querySelector("#applypilot-harvest-modal");
+    expect(modal).not.toBeNull();
+    expect(modal?.textContent).toContain("ApplyPilot 档案自学习提醒");
+    expect(modal?.querySelector("#ap-modal-sync")).not.toBeNull();
+    expect(modal?.querySelector("#ap-modal-skip")).not.toBeNull();
+
+    // Clicking skip closes the modal
+    (modal?.querySelector("#ap-modal-skip") as HTMLButtonElement).click();
+    expect(document.querySelector("#applypilot-harvest-modal")).toBeNull();
+  });
 });
+

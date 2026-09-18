@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { mapFields, parseCandidateProfile, type PageField } from "../../../packages/core/src/index";
+import { applyHarvestedFields, formatDateWithFieldClues, harvestPageFields, mapFields, parseCandidateProfile, type PageField } from "../../../packages/core/src/index";
 
 const profile = parseCandidateProfile({
   profile_id: "candidate-test",
@@ -407,4 +407,181 @@ describe("extension field planning", () => {
       "05",
     ]);
   });
+
+  describe("multi-format and custom variant adaptation", () => {
+    it("adapts date formats dynamically according to field types and placeholders", () => {
+      // YYYY-MM input with YYYY-MM-DD in profile
+      const monthField: PageField = {
+        ref: "m1",
+        label: "毕业时间",
+        name: "gradMonth",
+        kind: "text",
+        type: "month",
+        required: true,
+        value: "",
+        options: [],
+      };
+      expect(formatDateWithFieldClues("2024-06-30", monthField)).toBe("2024-06");
+
+      // HTML5 date input with YYYY-MM in profile
+      const dateField: PageField = {
+        ref: "d1",
+        label: "出生日期",
+        name: "birthDate",
+        kind: "text",
+        type: "date",
+        required: true,
+        value: "",
+        options: [],
+      };
+      expect(formatDateWithFieldClues("2001-05", dateField)).toBe("2001-05-01");
+
+      // Slash placeholder
+      const slashField: PageField = {
+        ref: "s1",
+        label: "入学时间",
+        name: "startDate",
+        kind: "text",
+        type: "text",
+        required: true,
+        value: "",
+        options: [],
+      };
+      expect(formatDateWithFieldClues("2020-09-01", { ...slashField, name: "YYYY/MM" })).toBe("2020/09");
+      expect(formatDateWithFieldClues("2020-09-01", { ...slashField, label: "入学年月(YYYY.MM)" })).toBe("2020.09");
+      expect(formatDateWithFieldClues("2020-09-01", { ...slashField, label: "入学年月(YYYY年MM月)" })).toBe("2020年09月");
+    });
+
+    it("matches custom variants configured by candidate in profile", () => {
+      const variantProfile = {
+        ...profile,
+        soe_extended: {
+          political_status: "团员",
+        },
+        custom_variants: {
+          political_status: ["共青团员", "中国共产主义青年团团员", "共青团"],
+        },
+      };
+
+      const selectField: PageField = {
+        ref: "pol-1",
+        label: "政治面貌",
+        name: "politicalStatus",
+        kind: "select",
+        required: true,
+        value: "",
+        options: ["请选择", "中国共产主义青年团团员", "群众"],
+      };
+
+      const plan = mapFields([selectField], variantProfile);
+      expect(plan[0].decision).toBe("fill");
+      expect(plan[0].proposedValue).toBe("中国共产主义青年团团员");
+    });
+  });
+
+  describe("reverse harvesting and profile enrichment", () => {
+    it("harvests standard and custom fields from scanned page", () => {
+      const scannedFields: PageField[] = [
+        {
+          ref: "f1",
+          label: "姓名",
+          name: "name",
+          kind: "text",
+          type: "text",
+          required: true,
+          value: "张三",
+          options: [],
+        },
+        {
+          ref: "f2",
+          label: "紧急联系人电话",
+          name: "emergencyPhone",
+          kind: "text",
+          type: "text",
+          required: true,
+          value: "13900139000",
+          options: [],
+        },
+        {
+          ref: "f3",
+          label: "期望薪资",
+          name: "salary",
+          kind: "text",
+          type: "text",
+          required: true,
+          value: "15000-20000",
+          options: [],
+        },
+        {
+          ref: "f4",
+          label: "特殊体貌特征",
+          name: "appearance",
+          kind: "text",
+          type: "text",
+          required: false,
+          value: "无",
+          options: [],
+        },
+      ];
+
+      const harvested = harvestPageFields(scannedFields, profile);
+      // '姓名' is already in profile ("张三"), so it's not a new/updated field and skipped
+      expect(harvested.some((h) => h.label === "姓名")).toBe(false);
+
+      // '紧急联系人电话' should be recognized as standard field
+      const emergencyItem = harvested.find((h) => h.label === "紧急联系人电话");
+      expect(emergencyItem).toBeDefined();
+      expect(emergencyItem?.category).toBe("standard");
+      expect(emergencyItem?.inferredPath).toBe("contact.emergency_contact_phone");
+      expect(emergencyItem?.value).toBe("13900139000");
+
+      // '期望薪资' should be recognized as standard soe_extended field
+      const salaryItem = harvested.find((h) => h.label === "期望薪资");
+      expect(salaryItem).toBeDefined();
+      expect(salaryItem?.inferredPath).toBe("soe_extended.expected_salary");
+
+      // '特殊体貌特征' is not in standard schema, so it goes to custom_fields
+      const customItem = harvested.find((h) => h.label === "特殊体貌特征");
+      expect(customItem).toBeDefined();
+      expect(customItem?.category).toBe("custom");
+      expect(customItem?.inferredPath).toBe('soe_extended.custom_fields["特殊体貌特征"]');
+      expect(customItem?.value).toBe("无");
+    });
+
+    it("applies harvested fields to enrich profile without mutating original", () => {
+      const scannedFields: PageField[] = [
+        {
+          ref: "f2",
+          label: "紧急联系人电话",
+          name: "emergencyPhone",
+          kind: "text",
+          type: "text",
+          required: true,
+          value: "13900139000",
+          options: [],
+        },
+        {
+          ref: "f4",
+          label: "特殊体貌特征",
+          name: "appearance",
+          kind: "text",
+          type: "text",
+          required: false,
+          value: "无",
+          options: [],
+        },
+      ];
+
+      const harvested = harvestPageFields(scannedFields, profile);
+      const updated = applyHarvestedFields(profile, harvested);
+
+      // Verify immutability
+      expect(profile.contact?.emergency_contact_phone).toBeUndefined();
+
+      // Verify updated profile has new fields
+      expect(updated.contact?.emergency_contact_phone).toBe("13900139000");
+      expect((updated.soe_extended?.custom_fields as Record<string, unknown>)?.[`特殊体貌特征`]).toBe("无");
+    });
+  });
 });
+

@@ -14,6 +14,7 @@ export type CandidateProfile = {
   campus_context?: Record<string, unknown>;
   soe_extended?: Record<string, unknown>;
   assets?: Array<Record<string, unknown>>;
+  custom_variants?: Record<string, string[]>;
   [key: string]: unknown;
 };
 
@@ -860,11 +861,61 @@ export function mapFields(fields: PageField[], profile?: CandidateProfile, secti
     if (value === undefined || value === null || String(value).trim() === "") return { field, decision: "review", profilePath, reason: `资料缺少：${profilePath}` };
     if (field.kind === "choice") return { field, decision: "review", profilePath, proposedValue: String(value), reason: "选择控件需要确认具体选项" };
     if (field.kind === "file") return { field, decision: "review", profilePath, proposedValue: String(value), reason: "附件需要在浏览器中选择文件" };
-    let proposedValue = formatValue(profilePath, value);
-    if (field.type === "date" && /^\d{4}-\d{2}$/.test(proposedValue)) return { field, decision: "review", profilePath, proposedValue, reason: "资料只有年月，日期控件需要完整日期" };
+    let proposedValue = formatValue(profilePath, value, field, profile);
+    if (field.type === "date" && /^\d{4}-\d{2}$/.test(proposedValue)) {
+      proposedValue = `${proposedValue}-01`;
+    }
 
     if (field.kind === "select" && field.options && field.options.length > 0) {
-      const matched = matchOptionText(field.options, proposedValue);
+      let matched = matchOptionText(field.options, proposedValue);
+
+      // Multi-format date option matching fallback
+      if (!matched && (isDateLikePath(profilePath) || /^\d{4}[-/.]\d{2}/.test(String(value).trim()))) {
+        const parts = parseDateComponents(value);
+        if (parts.year && parts.month) {
+          const mNum = parseInt(parts.month, 10);
+          const candidates = [
+            `${parts.year}-${parts.month}`,
+            `${parts.year}/${parts.month}`,
+            `${parts.year}.${parts.month}`,
+            `${parts.year}年${parts.month}月`,
+            `${parts.year}年${mNum}月`,
+            `${parts.year}-${mNum}`,
+            `${parts.year}/${mNum}`,
+            parts.year,
+            `${parts.year}年`,
+            parts.month,
+            `${parts.month}月`,
+            `${mNum}月`,
+            parts.day ? `${parts.year}-${parts.month}-${parts.day}` : "",
+            parts.day ? `${parts.year}/${parts.month}/${parts.day}` : "",
+            parts.day ? `${parts.year}年${parts.month}月${parts.day}日` : "",
+          ].filter(Boolean);
+
+          for (const cand of candidates) {
+            matched = matchOptionText(field.options, cand);
+            if (matched) {
+              proposedValue = matched;
+              break;
+            }
+          }
+        }
+      }
+
+      // User-configured custom variants fallback
+      if (!matched && profile?.custom_variants) {
+        const variants = profile.custom_variants[profilePath] || profile.custom_variants[profilePath.split(".").pop() || ""];
+        if (Array.isArray(variants)) {
+          for (const cand of variants) {
+            matched = matchOptionText(field.options, cand);
+            if (matched) {
+              proposedValue = matched;
+              break;
+            }
+          }
+        }
+      }
+
       if (matched) {
         proposedValue = matched;
       }
@@ -874,10 +925,184 @@ export function mapFields(fields: PageField[], profile?: CandidateProfile, secti
   });
 }
 
-function formatValue(path: string, value: unknown): string {
+export function isDateLikePath(path: string): boolean {
+  return /date|time|birth|graduation|start_date|end_date|available_date|join_party_date/i.test(path);
+}
+
+export function formatDateWithFieldClues(rawDate: string, field?: PageField): string {
+  const parts = parseDateComponents(rawDate);
+  if (!parts.year || !parts.month) return rawDate;
+
+  const type = (field?.type || "").toLowerCase();
+  const label = (field?.label || "").toLowerCase();
+  const hint = `${field?.label || ""} ${field?.name || ""}`.toLowerCase();
+
+  // 1. Explicit HTML5 month input
+  if (type === "month") {
+    return `${parts.year}-${parts.month}`;
+  }
+
+  // 2. Explicit HTML5 date input (must be YYYY-MM-DD)
+  if (type === "date") {
+    return `${parts.year}-${parts.month}-${parts.day || "01"}`;
+  }
+
+  // 3. Clues from label, placeholder, name
+  if (label.includes("年月") || /yyyy[-/.]mm(?![a-z])/i.test(hint)) {
+    if (hint.includes("/") || hint.includes("yyyy/mm")) return `${parts.year}/${parts.month}`;
+    if (hint.includes(".") || hint.includes("yyyy.mm")) return `${parts.year}.${parts.month}`;
+    if (hint.includes("年") && hint.includes("月")) return `${parts.year}年${parts.month}月`;
+    return `${parts.year}-${parts.month}`;
+  }
+
+  if (/yyyy\/mm\/dd/i.test(hint) || (hint.includes("/") && /dd|日/i.test(hint))) {
+    return `${parts.year}/${parts.month}/${parts.day || "01"}`;
+  }
+  if (/yyyy\.mm\.dd/i.test(hint) || (hint.includes(".") && /dd|日/i.test(hint))) {
+    return `${parts.year}.${parts.month}.${parts.day || "01"}`;
+  }
+  if (/年月日/i.test(hint) || (hint.includes("年") && hint.includes("月") && hint.includes("日"))) {
+    return `${parts.year}年${parts.month}月${parts.day || "01"}日`;
+  }
+
+  if (hint.includes("/")) {
+    return parts.day ? `${parts.year}/${parts.month}/${parts.day}` : `${parts.year}/${parts.month}`;
+  }
+  if (hint.includes(".")) {
+    return parts.day ? `${parts.year}.${parts.month}.${parts.day}` : `${parts.year}.${parts.month}`;
+  }
+
+  return parts.day ? `${parts.year}-${parts.month}-${parts.day}` : `${parts.year}-${parts.month}`;
+}
+
+function formatValue(path: string, value: unknown, field?: PageField, profile?: CandidateProfile): string {
   const displayed = String(display(value));
   if (path.endsWith("education_level")) {
     return ({ high_school: "高中", associate: "专科", bachelor: "本科", master: "硕士", doctor: "博士" } as Record<string, string>)[displayed.toLowerCase()] || displayed;
   }
+  if (isDateLikePath(path) || /^\d{4}[-/.]\d{2}(?:[-/.]\d{2})?$/.test(displayed.trim())) {
+    return formatDateWithFieldClues(displayed, field);
+  }
   return displayed;
+}
+
+export type HarvestedField = {
+  ref: string;
+  frameId?: number;
+  label: string;
+  name: string;
+  value: string;
+  inferredPath: string;
+  category: "standard" | "custom";
+  isUpdate: boolean;
+  previousValue?: string;
+};
+
+export function harvestPageFields(fields: PageField[], profile?: CandidateProfile): HarvestedField[] {
+  const harvested: HarvestedField[] = [];
+  const p = profile || { profile_id: "default" };
+
+  for (const field of fields) {
+    const rawVal = String(field.value || "").trim();
+    if (!rawVal) continue;
+    if (field.type === "password" || field.type === "hidden" || field.type === "submit") continue;
+    const label = field.label || field.name || "";
+    if (/验证码|短信|captcha|search|搜索/i.test(label)) continue;
+    if (/^(请选择|--请选择--|选择|未选择|select)$/i.test(rawVal)) continue;
+
+    const ruleMatch = fieldRule(field, field.section, p);
+    if (ruleMatch) {
+      const path = ruleMatch.rule.path;
+      const curr = ruleMatch.rule.value(p);
+      const currStr = curr !== undefined && curr !== null ? String(display(curr)).trim() : "";
+      if (currStr === rawVal) {
+        continue;
+      }
+      harvested.push({
+        ref: field.ref,
+        frameId: field.frameId,
+        label: field.label || field.name,
+        name: field.name,
+        value: rawVal,
+        inferredPath: path,
+        category: "standard",
+        isUpdate: currStr !== "",
+        previousValue: currStr || undefined,
+      });
+    } else {
+      const cleanLabel = (field.label || field.name).replace(/[*＊:：\s]/g, "").slice(0, 40);
+      if (!cleanLabel || /^(请选择|选择|select|submit)$/i.test(cleanLabel)) continue;
+      const path = `soe_extended.custom_fields["${cleanLabel}"]`;
+      const existingCustom = (p.soe_extended?.custom_fields as Record<string, unknown> | undefined)?.[cleanLabel];
+      const existStr = existingCustom !== undefined && existingCustom !== null ? String(existingCustom).trim() : "";
+      if (existStr === rawVal) {
+        continue;
+      }
+      harvested.push({
+        ref: field.ref,
+        frameId: field.frameId,
+        label: cleanLabel,
+        name: field.name,
+        value: rawVal,
+        inferredPath: path,
+        category: "custom",
+        isUpdate: existStr !== "",
+        previousValue: existStr || undefined,
+      });
+    }
+  }
+
+  return harvested;
+}
+
+export function applyHarvestedFields(profile: CandidateProfile, items: HarvestedField[]): CandidateProfile {
+  const updated: CandidateProfile = JSON.parse(JSON.stringify(profile));
+
+  for (const item of items) {
+    const path = item.inferredPath;
+    const val = item.value;
+
+    if (path.startsWith('soe_extended.custom_fields["')) {
+      if (!updated.soe_extended) updated.soe_extended = {};
+      if (!updated.soe_extended.custom_fields || typeof updated.soe_extended.custom_fields !== "object") {
+        updated.soe_extended.custom_fields = {};
+      }
+      const match = path.match(/\["([^"]+)"\]/);
+      if (match) {
+        (updated.soe_extended.custom_fields as Record<string, unknown>)[match[1]] = val;
+      }
+    } else {
+      setNestedProperty(updated as Record<string, unknown>, path, val);
+    }
+  }
+
+  return updated;
+}
+
+function setNestedProperty(obj: Record<string, unknown>, path: string, value: unknown): void {
+  const normalizedPath = path
+    .replace(/\[highest\]|\[latest\]/g, "[0]")
+    .replace(/\[year\]|\[month\]|\[day\]|\[province\]|\[city\]|\[district\]/g, "");
+
+  const tokens = normalizedPath
+    .replace(/\[(\d+)\]/g, ".$1")
+    .split(".")
+    .filter(Boolean);
+
+  let current: any = obj;
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const token = tokens[i];
+    const nextToken = tokens[i + 1];
+    const nextIsNum = /^\d+$/.test(nextToken);
+
+    if (current[token] === undefined || current[token] === null || typeof current[token] !== "object") {
+      current[token] = nextIsNum ? [] : {};
+    }
+    current = current[token];
+  }
+
+  const lastToken = tokens[tokens.length - 1];
+  if (lastToken) {
+    current[lastToken] = value;
+  }
 }

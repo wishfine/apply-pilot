@@ -224,7 +224,18 @@ export function scanPage(): PageScan {
     const ref = `ap-${sequence++}`;
     element.setAttribute("data-applypilot-ref", ref);
     const options = element instanceof HTMLSelectElement ? Array.from(element.options).filter((option) => !option.disabled && clean(option.textContent)).map((option) => clean(option.textContent)) : [];
-    const value = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement ? control.value : clean(element.textContent);
+    let value = "";
+    if (element instanceof HTMLSelectElement) {
+      const selected = element.selectedOptions?.[0] || element.options[element.selectedIndex];
+      const optText = selected ? clean(selected.textContent) : "";
+      value = optText && !/^(请选择|--请选择--|选择|未选择|select)$/i.test(optText) ? optText : (control.value || "");
+    } else if (element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio")) {
+      value = element.checked ? (clean(element.value) || "是") : "";
+    } else if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      value = control.value;
+    } else {
+      value = clean(element.textContent);
+    }
     const section = sectionFor(element);
     fields.push({ ref, label: finalLabel, name: clean(control.name || element.id || hint), type, kind, required, value, options, section, recordGroup: recordGroupFor(element, section) });
   }
@@ -507,3 +518,103 @@ export function clickSection(ref: string): FillReceipt {
     return { ok: false, message: error instanceof Error ? error.message : "分区切换失败" };
   }
 }
+
+/** Injects a click interceptor for next/submit/save buttons to prompt the user to harvest new inputs */
+export function installHarvestInterceptor(): void {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  const win = window as unknown as { __applypilot_interceptor_installed?: boolean };
+  if (win.__applypilot_interceptor_installed) return;
+  win.__applypilot_interceptor_installed = true;
+
+  let allowPassThrough = false;
+
+  const isNextOrSubmit = (element: Element | null): HTMLElement | null => {
+    if (!element) return null;
+    const target = element.closest("button, input[type='button'], input[type='submit'], a, [role='button']");
+    if (!target) return null;
+    const text = (target.textContent || (target as HTMLInputElement).value || target.getAttribute("aria-label") || target.getAttribute("title") || "").trim();
+    if (/^(下一步|保存|提交|暂存|下一步填写|保存并下一步|提交申请|保存并继续|提交简历|next|submit|save)$/i.test(text) || /(?:保存并|提交申请|提交简历|下一步)/.test(text)) {
+      return target as HTMLElement;
+    }
+    return null;
+  };
+
+  const showHarvestModal = (onProceed: () => void) => {
+    const existing = document.getElementById("applypilot-harvest-modal");
+    if (existing) existing.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "applypilot-harvest-modal";
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;";
+
+    const dialog = document.createElement("div");
+    dialog.style.cssText = "background:#ffffff;border-radius:12px;padding:24px;width:420px;max-width:90vw;box-shadow:0 10px 25px rgba(0,0,0,0.2);border:1px solid #e5e7eb;color:#1f2937;box-sizing:border-box;font-size:14px;line-height:1.5;";
+
+    dialog.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#2563eb;color:#fff;font-weight:bold;font-size:16px;">✓</span>
+        <strong style="font-size:16px;color:#111827;">ApplyPilot 档案自学习提醒</strong>
+      </div>
+      <p style="color:#4b5563;margin:0 0 16px 0;">
+        检测到您在当前页面补充填写了表单内容。是否在进入下一步/提交前，将这些新信息同步保存到您的简历档案，以便下次自动填写？
+      </p>
+      <div style="display:flex;justify-content:flex-end;gap:10px;">
+        <button id="ap-modal-skip" style="padding:8px 14px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">
+          直接继续
+        </button>
+        <button id="ap-modal-sync" style="padding:8px 16px;border:none;background:#2563eb;color:#ffffff;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">
+          📥 同步到档案并继续
+        </button>
+      </div>
+    `;
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    const closeModal = () => overlay.remove();
+
+    dialog.querySelector("#ap-modal-skip")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeModal();
+      onProceed();
+    });
+
+    dialog.querySelector("#ap-modal-sync")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      try {
+        if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+          chrome.runtime.sendMessage({ type: "APPLYPILOT_TRIGGER_HARVEST" });
+        }
+      } catch (err) {
+        console.warn("ApplyPilot: failed to message sidepanel", err);
+      }
+      closeModal();
+      onProceed();
+    });
+  };
+
+  document.addEventListener("click", (event) => {
+    if (allowPassThrough) return;
+    const btn = isNextOrSubmit(event.target as Element);
+    if (!btn) return;
+
+    const hasAnyInputs = Array.from(document.querySelectorAll("input, select, textarea")).some((el) => {
+      if ((el as HTMLInputElement).disabled || ["hidden", "password"].includes((el as HTMLInputElement).type)) return false;
+      if (el instanceof HTMLSelectElement) return el.selectedIndex > 0 && el.value !== "";
+      if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) return el.checked;
+      return Boolean((el as HTMLInputElement).value?.trim());
+    });
+
+    if (!hasAnyInputs) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    showHarvestModal(() => {
+      allowPassThrough = true;
+      btn.click();
+      setTimeout(() => { allowPassThrough = false; }, 1000);
+    });
+  }, true);
+}
+

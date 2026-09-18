@@ -1,8 +1,8 @@
-import { parse as parseYaml } from "yaml";
-import { mapFields, parseCandidateProfile, type CandidateProfile, type FieldPlan } from "../../../../packages/core/src/index";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { applyHarvestedFields, harvestPageFields, mapFields, parseCandidateProfile, type CandidateProfile, type FieldPlan, type HarvestedField } from "../../../../packages/core/src/index";
 import { OperationStore, ProfileStore } from "../../../../packages/storage/src/index";
 import { applyApiPlan, DEFAULT_API_ENDPOINT, isLoopbackEndpoint, requestFormPlan, validateApplyPilotEndpoint } from "../../runtime/api";
-import { clickSection, clearFileBuffer, fillField, fillFileChunk, scanPage, type FilePayload, type FillReceipt, type PageScan, type PageSection } from "../../runtime/page";
+import { clickSection, clearFileBuffer, fillField, fillFileChunk, installHarvestInterceptor, scanPage, type FilePayload, type FillReceipt, type PageScan, type PageSection } from "../../runtime/page";
 import "../../styles/sidepanel.css";
 
 const store = new ProfileStore();
@@ -10,7 +10,25 @@ const rootElement = document.querySelector<HTMLDivElement>("#app");
 if (!rootElement) throw new Error("ApplyPilot sidepanel root is missing");
 const root = rootElement;
 
-type UiState = { activeTab?: chrome.tabs.Tab; scan?: PageScan; runId?: string; plan: FieldPlan[]; receipts: Record<string, FillReceipt>; profile?: CandidateProfile; asset?: FilePayload; apiEndpoint: string; apiToken?: string; allowRemoteApi: boolean; apiStatus: "unknown" | "connected" | "fallback"; error?: string; warning?: string; busy: boolean };
+type UiState = {
+  activeTab?: chrome.tabs.Tab;
+  scan?: PageScan;
+  runId?: string;
+  plan: FieldPlan[];
+  receipts: Record<string, FillReceipt>;
+  profile?: CandidateProfile;
+  asset?: FilePayload;
+  apiEndpoint: string;
+  apiToken?: string;
+  allowRemoteApi: boolean;
+  apiStatus: "unknown" | "connected" | "fallback";
+  error?: string;
+  warning?: string;
+  busy: boolean;
+  harvested?: HarvestedField[];
+  selectedHarvestRefs?: Set<string>;
+  harvestMessage?: string;
+};
 const state: UiState = { plan: [], receipts: {}, apiEndpoint: DEFAULT_API_ENDPOINT, allowRemoteApi: false, apiStatus: "unknown", busy: false };
 const operations = new OperationStore();
 
@@ -157,6 +175,9 @@ async function scan() {
     await loadApiSettings();
     await refreshPlanFromApi();
     state.receipts = {};
+    if (tab.id) {
+      void chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func: installHarvestInterceptor }).catch(() => undefined);
+    }
   } catch (error) { state.error = explainBrowserError(error, "扫描页面失败"); }
   finally { state.busy = false; render(); }
 }
@@ -207,6 +228,9 @@ async function fill() {
         throw error;
       }
       render();
+    }
+    if (state.activeTab?.id) {
+      void chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, allFrames: true }, func: installHarvestInterceptor }).catch(() => undefined);
     }
   } catch (error) { state.error = explainBrowserError(error, "填写失败"); }
   finally { state.busy = false; render(); }
@@ -265,6 +289,89 @@ async function unlock() {
   finally { state.busy = false; render(); }
 }
 
+async function harvest() {
+  state.busy = true; state.error = undefined; state.harvestMessage = undefined; render();
+  try {
+    const tab = await activeTab();
+    await ensureSiteAccess(tab);
+    let results: chrome.scripting.InjectionResult<PageScan>[];
+    try {
+      results = await chrome.scripting.executeScript({ target: { tabId: tab.id!, allFrames: true }, func: scanPage });
+    } catch {
+      results = await chrome.scripting.executeScript({ target: { tabId: tab.id!, frameIds: [0] }, func: scanPage });
+    }
+    const frames = results.map((item) => ({ frameId: item.frameId ?? 0, scan: item.result as PageScan })).filter((item) => item.scan);
+    if (!frames.length) throw new Error("未能获取页面字段值");
+    const fields = frames.flatMap((item) => item.scan.fields.map((field) => ({ ...field, frameId: item.frameId })));
+    const items = harvestPageFields(fields, state.profile);
+    if (items.length === 0) {
+      state.harvestMessage = "当前页面已填写的字段均已收录在档案中，未发现未保存的新字段。";
+      state.harvested = [];
+    } else {
+      state.harvested = items;
+      state.selectedHarvestRefs = new Set(items.map((i) => `${i.frameId ?? 0}:${i.ref}`));
+    }
+  } catch (error) {
+    state.error = explainBrowserError(error, "采集页面已填字段失败");
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+async function confirmSyncHarvested() {
+  if (!state.harvested || !state.selectedHarvestRefs) return;
+  const toSync = state.harvested.filter((item) => state.selectedHarvestRefs?.has(`${item.frameId ?? 0}:${item.ref}`));
+  if (toSync.length === 0) {
+    state.harvestMessage = "未勾选任何需要同步的字段";
+    render();
+    return;
+  }
+  state.busy = true; render();
+  try {
+    const baseProfile = state.profile || { profile_id: `candidate-${Date.now()}` };
+    const updated = applyHarvestedFields(baseProfile, toSync);
+    await store.save(updated);
+    state.profile = updated;
+    state.harvestMessage = `成功同步 ${toSync.length} 项新字段到档案！可直接点击上方【导出最新 YAML】下载更新后的文件。`;
+    state.harvested = undefined;
+    if (state.scan) {
+      state.plan = buildPlan(state.scan.fields, state.scan.activeSection);
+    }
+  } catch (error) {
+    state.error = error instanceof Error ? error.message : "同步到档案失败";
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+function exportYaml() {
+  if (!state.profile) {
+    state.error = "尚未加载或建立档案，无法导出";
+    render();
+    return;
+  }
+  try {
+    const text = stringifyYaml(state.profile);
+    const blob = new Blob([text], { type: "application/yaml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const filename = `${state.profile.identity?.name || state.profile.profile_id || "profile"}.yaml`;
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    state.harvestMessage = `已下载最新配置文件：${filename}`;
+    render();
+  } catch (error) {
+    state.error = error instanceof Error ? error.message : "导出 YAML 失败";
+    render();
+  }
+}
+
 function render() {
   root.replaceChildren();
   const header = h("header", {}, [h("div", { class: "brand" }, [h("span", { class: "mark", text: "✓" }), h("strong", { text: "ApplyPilot" })]), h("span", { class: "version", text: "当前页助手" })]);
@@ -275,7 +382,60 @@ function render() {
   const fillButton = h("button", { class: "secondary", text: "开始填写" }) as HTMLButtonElement;
   fillButton.disabled = state.busy || state.scan?.pageState === "login" || state.scan?.pageState === "loading";
   fillButton.onclick = () => void start();
-  actions.append(scanButton, fillButton);
+  const harvestButton = h("button", { class: "secondary btn-harvest", text: "📥 采集已填项" }) as HTMLButtonElement;
+  harvestButton.disabled = state.busy;
+  harvestButton.onclick = () => void harvest();
+  const exportButton = h("button", { class: "secondary btn-export", text: "导出最新 YAML" }) as HTMLButtonElement;
+  exportButton.disabled = state.busy || !state.profile;
+  exportButton.onclick = exportYaml;
+  actions.append(scanButton, fillButton, harvestButton, exportButton);
+
+  if (state.harvestMessage) {
+    root.append(h("div", { class: "notice success", text: state.harvestMessage }));
+  }
+
+  if (state.harvested && state.harvested.length > 0) {
+    const harvestCard = h("section", { class: "card harvest-card" });
+    harvestCard.append(
+      h("div", { class: "card-title", text: `发现页面已填入 ${state.harvested.length} 项新信息` }),
+      h("p", { class: "muted", text: "以下是您在网页上填写的字段，确认勾选后一键同步至本地档案：" })
+    );
+    const harvestList = h("div", { class: "harvest-list" });
+    state.harvested.forEach((item) => {
+      const key = `${item.frameId ?? 0}:${item.ref}`;
+      const checkbox = h("input", { type: "checkbox" }) as HTMLInputElement;
+      checkbox.checked = state.selectedHarvestRefs?.has(key) !== false;
+      checkbox.onchange = () => {
+        if (!state.selectedHarvestRefs) state.selectedHarvestRefs = new Set();
+        if (checkbox.checked) state.selectedHarvestRefs.add(key);
+        else state.selectedHarvestRefs.delete(key);
+      };
+      const labelRow = h("div", { class: "harvest-label-row" }, [
+        h("strong", { text: item.label }),
+        h("span", { class: `tag ${item.category}`, text: item.category === "standard" ? "标准字段" : "自定义字段" }),
+        ...(item.isUpdate ? [h("span", { class: "tag update", text: "更新值" })] : [])
+      ]);
+      const details = h("div", { class: "harvest-details" }, [
+        labelRow,
+        h("div", { class: "harvest-value", text: item.value }),
+        h("small", { class: "muted", text: `目标路径: ${item.inferredPath}` })
+      ]);
+      const itemEl = h("label", { class: "harvest-item" }, [checkbox, details]);
+      harvestList.append(itemEl);
+    });
+    harvestCard.append(harvestList);
+
+    const harvestActions = h("div", { class: "harvest-actions" });
+    const syncButton = h("button", { class: "primary", text: "一键同步到档案" }) as HTMLButtonElement;
+    syncButton.disabled = state.busy;
+    syncButton.onclick = () => void confirmSyncHarvested();
+    const cancelButton = h("button", { class: "secondary", text: "取消" }) as HTMLButtonElement;
+    cancelButton.onclick = () => { state.harvested = undefined; render(); };
+    harvestActions.append(syncButton, cancelButton);
+    harvestCard.append(harvestActions);
+
+    root.append(harvestCard);
+  }
 
   const profileSection = h("section", { class: "card" });
   profileSection.append(h("div", { class: "card-title", text: "候选人资料" }), h("p", { class: "muted", text: state.profile ? `已加载：${state.profile.identity?.name || state.profile.profile_id}` : "尚未导入资料" }));
@@ -328,3 +488,13 @@ function render() {
 
 void store.load().then((profile) => { state.profile = profile; render(); }).catch((error) => { state.error = error instanceof Error ? error.message : "资料库需要先解锁"; render(); });
 render();
+
+if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+  chrome.runtime.onMessage.addListener((message: unknown, _sender: unknown, sendResponse: (res: unknown) => void) => {
+    if (typeof message === "object" && message !== null && (message as { type?: string }).type === "APPLYPILOT_TRIGGER_HARVEST") {
+      void harvest();
+      sendResponse({ ok: true });
+    }
+  });
+}
+

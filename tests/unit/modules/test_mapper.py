@@ -263,10 +263,10 @@ def test_emergency_contact_does_not_mismatch_mobile():
 
 def test_unmapped_fallback():
     unmapped_labels = [
-        "期望薪资",
-        "自我介绍",
+        "未知随机字段",
+        "宠物喜好",
         "个人主页GitHub",
-        "特长爱好",
+        "测试未收录字段",
         "12345678",
     ]
 
