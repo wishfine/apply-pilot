@@ -321,4 +321,82 @@ describe("extension field planning", () => {
       "北京市东城区",
     ]);
   });
+
+  it("maps split date of birth dropdowns to birth year and month, strictly avoiding graduation year", () => {
+    const candidateProfile = {
+      ...profile,
+      identity: {
+        ...profile.identity,
+        birth_date: "2001-05-15",
+      },
+      campus_context: {
+        graduation_year: 2028,
+        graduation_month: 1,
+      },
+    };
+
+    const birthYearSelect: PageField = {
+      ref: "byear",
+      label: "出生年份",
+      name: "birthYear",
+      kind: "select",
+      required: true,
+      value: "",
+      options: ["2028年", "2027年", "2001年", "2000年"],
+    };
+    const birthMonthSelect: PageField = {
+      ref: "bmonth",
+      label: "出生月份",
+      name: "birthMonth",
+      kind: "select",
+      required: true,
+      value: "",
+      options: ["01月", "02月", "05月", "12月"],
+    };
+
+    const plan = mapFields([birthYearSelect, birthMonthSelect], candidateProfile);
+    expect(plan.map((item) => item.proposedValue)).toEqual([
+      "2001年",
+      "05月",
+    ]);
+    expect(plan.every((item) => item.decision === "fill")).toBe(true);
+  });
+
+  it("cascades birth date across multiple selects when label is general 出生日期", () => {
+    const candidateProfile = {
+      ...profile,
+      identity: {
+        ...profile.identity,
+        birth_date: "2001-05-15",
+      },
+      campus_context: {
+        graduation_year: 2028,
+      },
+    };
+
+    const select1: PageField = {
+      ref: "s1",
+      label: "出生日期",
+      name: "year",
+      kind: "select",
+      required: true,
+      value: "",
+      options: ["2028", "2001", "2000"],
+    };
+    const select2: PageField = {
+      ref: "s2",
+      label: "出生日期",
+      name: "month",
+      kind: "select",
+      required: true,
+      value: "",
+      options: ["01", "05", "12"],
+    };
+
+    const plan = mapFields([select1, select2], candidateProfile);
+    expect(plan.map((item) => item.proposedValue)).toEqual([
+      "2001",
+      "05",
+    ]);
+  });
 });

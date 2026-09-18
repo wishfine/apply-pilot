@@ -32,7 +32,12 @@ export function scanPage(): PageScan {
     if (/^(请输入|请选择|选择|上传文件|点击上传|点击选择|请填写|选填|必填)(?:\.\.\.|…)?$/i.test(candidate)) return "";
     return candidate.length <= 80 ? candidate : "";
   };
+  const isControl = (node: Element | null | undefined): boolean => {
+    if (!node || typeof (node as Element).matches !== "function") return false;
+    return (node as Element).matches("input, textarea, select, button, [contenteditable='true'], [role='textbox'], [role='combobox'], [role='radio'], [role='checkbox']");
+  };
   const textWithoutControls = (node: Element) => {
+    if (isControl(node)) return "";
     const copy = node.cloneNode(true) as Element;
     copy.querySelectorAll("input, textarea, select, button, [contenteditable='true'], [role='textbox'], [role='combobox'], [role='radio'], [role='checkbox']").forEach((control) => control.remove());
     return clean(copy.textContent);
@@ -65,6 +70,8 @@ export function scanPage(): PageScan {
       if (current.getAttribute("aria-required") === "true" || ["data-required", "data-is-required", "data-required-field"].some((name) => /^(true|1|required|必填|必选)$/i.test(current?.getAttribute(name) || "")) || /(?:^|[-_ ])(?:is[-_ ]?)?(?:required|mandatory|must|required-field)(?:$|[-_ ])/i.test(current.className || "")) return true;
       if (current === document.body || current === document.documentElement) break;
     }
+    const hasClassOrIconRequired = container?.querySelector(".required, .star, [class*='require'], [class*='star'], [class*='mandatory'], [style*='color: red'], [style*='color:red']") !== null;
+    if (hasClassOrIconRequired) return true;
     const semanticTexts = [associated, nearby].filter((node): node is Element => Boolean(node)).map(textWithoutControls);
     const semanticMarker = [label, ...nodes.flatMap((node) => [node.className || "", node.getAttribute("aria-label") || "", node.getAttribute("data-label") || ""]), ...semanticTexts].join(" ").slice(0, 1200);
     const starMarker = [label, associated?.textContent || "", nearby?.textContent || "", ...nodes.map(pseudoContent)].join(" ");
@@ -74,18 +81,21 @@ export function scanPage(): PageScan {
   };
   const previousSiblingLabel = (element: Element, hint: string) => {
     let current: Element | null = element;
-    for (let depth = 0; current && depth < 6; depth += 1) {
+    for (let depth = 0; depth < 6; depth += 1) {
       const ancestor: HTMLElement | null = current.parentElement;
       if (!ancestor) break;
       const siblings: Element[] = Array.from(ancestor.children);
       const index = siblings.indexOf(current);
       for (let i = index - 1; i >= 0; i -= 1) {
+        if (isControl(siblings[i])) continue;
         const candidate = usefulLabel(textWithoutControls(siblings[i]), hint);
         if (candidate && (!/[*＊]/.test(candidate) || /^[*＊]\s*[^*＊]/.test(candidate) || /^[^:*＊：]{1,40}\s*[*＊]$/.test(candidate))) return candidate;
       }
       const preceding = current.previousElementSibling;
-      const candidate = usefulLabel(preceding ? textWithoutControls(preceding) : "", hint);
-      if (candidate && (!/[*＊]/.test(candidate) || /^[*＊]\s*[^*＊]/.test(candidate) || /^[^:*＊：]{1,40}\s*[*＊]$/.test(candidate))) return candidate;
+      if (preceding && !isControl(preceding)) {
+        const candidate = usefulLabel(textWithoutControls(preceding), hint);
+        if (candidate && (!/[*＊]/.test(candidate) || /^[*＊]\s*[^*＊]/.test(candidate) || /^[^:*＊：]{1,40}\s*[*＊]$/.test(candidate))) return candidate;
+      }
       current = ancestor;
     }
     return "";
@@ -138,8 +148,12 @@ export function scanPage(): PageScan {
     const hint = clean(element.getAttribute("aria-label") || element.getAttribute("placeholder") || element.getAttribute("name") || element.id);
     const ownerRoot = element.getRootNode() as Document | ShadowRoot;
     const associated = element.id ? ownerRoot.querySelector(`label[for="${CSS.escape(element.id)}"]`) : null;
-    const container = element.closest("label, .form-item, .form-group, .field, [class*='field'], [class*='form']");
-    const nearby = container?.querySelector("label, legend, .label, [class*='label']");
+    const container = element.closest("label, .form-item, .form-group, .field, [class*='field'], [class*='form'], [class*='row'], .row, tr, [class*='item'], [class*='line']");
+    let nearby = container?.querySelector("label, legend, th, .label, [class*='label'], [class*='title']");
+    if (!nearby && (element.closest("td") || element.closest("th"))) {
+      const cell = element.closest("td, th");
+      nearby = cell?.previousElementSibling || container?.querySelector("td:first-child, th:first-child");
+    }
     const labelledBy = clean((element.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean).map((id) => ownerRoot.querySelector(`#${CSS.escape(id)}`)?.textContent || "").join(" "));
     const explicit = clean(element.getAttribute("data-label") || element.getAttribute("data-field-label") || element.getAttribute("title"));
     const label = usefulLabel(labelledBy, hint) || usefulLabel(associated?.textContent || "", hint) || usefulLabel(nearby?.textContent || "", hint) || usefulLabel(explicit, hint) || previousSiblingLabel(element, hint) || usefulLabel(hint, hint) || usefulLabel(uploadHost?.textContent || "", hint) || (type === "file" ? "附件上传" : "");
@@ -155,20 +169,54 @@ export function scanPage(): PageScan {
 
     // Disambiguate compound fields and cascading selects within the same container
     let finalLabel = label;
+    const normL = clean(label).replace(/[*＊:：\s]/g, "");
+    const hostContainer = element.closest("tr, td, label, .form-item, .form-group, .field, [class*='field'], [class*='form'], [class*='row'], .row, [class*='item'], [class*='line'], [class*='group']");
+    const containerText = clean(hostContainer?.textContent || "").replace(/[*＊:：\s]/g, "");
+
     if (kind === "select") {
-      const normL = clean(label).replace(/[*＊:：\s]/g, "");
-      const hostContainer = element.closest("tr, td, label, .form-item, .form-group, .field, [class*='field'], [class*='form'], [class*='row'], .row");
       if (hostContainer) {
         const siblingSelects = Array.from(hostContainer.querySelectorAll("select")).filter(visible);
         if (/身份证|证件号|证件号码/.test(normL) && !/类型|种类/.test(normL)) {
           finalLabel = "证件类型";
         } else if (/手机|移动电话/.test(normL) && !/区号|国家|地区/.test(normL)) {
           finalLabel = "手机区号";
+        } else if (siblingSelects.length > 1 && (/出生|生日/.test(normL) || /出生|生日/.test(containerText))) {
+          const selectIndex = siblingSelects.indexOf(element as HTMLSelectElement);
+          if (selectIndex === 0) finalLabel = "出生年份";
+          else if (selectIndex === 1) finalLabel = "出生月份";
+          else if (selectIndex === 2) finalLabel = "出生日";
+        } else if (siblingSelects.length > 1 && (/入学|开始/.test(normL) || /入学|开始/.test(containerText))) {
+          const selectIndex = siblingSelects.indexOf(element as HTMLSelectElement);
+          if (selectIndex === 0) finalLabel = "入学年份";
+          else if (selectIndex === 1) finalLabel = "入学月份";
+        } else if (siblingSelects.length > 1 && (/毕业|结束|离校/.test(normL) || /毕业|结束|离校/.test(containerText))) {
+          const selectIndex = siblingSelects.indexOf(element as HTMLSelectElement);
+          if (selectIndex === 0) finalLabel = "毕业年份";
+          else if (selectIndex === 1) finalLabel = "毕业月份";
         } else if (siblingSelects.length > 1 && /籍贯|户籍|户口|居住|现居|常住|地址/.test(normL)) {
           const selectIndex = siblingSelects.indexOf(element as HTMLSelectElement);
           if (selectIndex === 0) finalLabel = `${normL}省份`;
           else if (selectIndex === 1) finalLabel = `${normL}城市`;
           else if (selectIndex === 2) finalLabel = `${normL}区县`;
+        } else if (normL === "年" || normL === "月" || normL === "日") {
+          const prefix = /出生|生日/.test(containerText) ? "出生" : /毕业/.test(containerText) ? "毕业" : /入学/.test(containerText) ? "入学" : "";
+          if (prefix) {
+            if (normL === "年") finalLabel = `${prefix}年份`;
+            else if (normL === "月") finalLabel = `${prefix}月份`;
+            else if (normL === "日") finalLabel = `${prefix}日`;
+          }
+        }
+      }
+    } else if (kind === "text") {
+      // If text input is in compound row with select (like ID type + ID number, or Country code + Mobile)
+      if (hostContainer) {
+        const hasSiblingSelect = hostContainer.querySelector("select") !== null;
+        if (hasSiblingSelect) {
+          if (/证件类型|证件种类/.test(normL)) {
+            finalLabel = label.includes("*") ? "* 身份证号" : "身份证号";
+          } else if (/手机区号|国家代码|国际区号/.test(normL)) {
+            finalLabel = label.includes("*") ? "* 手机号码" : "手机号码";
+          }
         }
       }
     }
@@ -217,9 +265,17 @@ export function fillField(ref: string, value: string): FillReceipt {
   if (!element) return { ok: false, message: "页面已变化，请重新扫描" };
   const expected = String(value);
   const dispatch = () => {
-    element.dispatchEvent(new Event("input", { bubbles: true }));
-    element.dispatchEvent(new Event("change", { bubbles: true }));
-    element.dispatchEvent(new Event("blur", { bubbles: true }));
+    try {
+      if (typeof InputEvent !== "undefined") {
+        element.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: expected, inputType: "insertText" }));
+      } else {
+        element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+      }
+    } catch {
+      element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    }
+    element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    element.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
   };
   try {
     if (element instanceof HTMLSelectElement) {
@@ -231,14 +287,26 @@ export function fillField(ref: string, value: string): FillReceipt {
 
       const validOptions = options.filter((opt) => {
         const n = norm(opt.text);
-        return n && !/^(请选择|--请选择--|选择|未选择|select)$/i.test(n);
+        return n && !/^(请选择|--请选择--|选择|未选择|select)$/i.test(norm(n));
       });
       const candidates = validOptions.length ? validOptions : options;
 
       // 1. Exact match (by text or value)
       let matchedOption = candidates.find((c) => norm(c.text) === normWanted || c.value.trim().toLowerCase() === wanted.toLowerCase());
 
-      // 2. Synonym groups lookup
+      // 2. Numeric / Date component matching (e.g. "05" matches "5", "05", "5月", "05月"; "2001" matches "2001", "2001年")
+      if (!matchedOption) {
+        const targetDigits = normWanted.replace(/\D/g, "");
+        if (targetDigits.length > 0 && targetDigits.length <= 4) {
+          const targetNum = parseInt(targetDigits, 10);
+          matchedOption = candidates.find((c) => {
+            const optDigits = norm(c.text).replace(/\D/g, "");
+            return optDigits.length > 0 && parseInt(optDigits, 10) === targetNum;
+          });
+        }
+      }
+
+      // 3. Synonym groups lookup
       if (!matchedOption) {
         const SYNONYMS = [
           ["中国共产党党员", "中共党员", "党员"],
@@ -277,13 +345,16 @@ export function fillField(ref: string, value: string): FillReceipt {
           ["农村居民", "农村", "农村户口", "农业户口", "农业"]
         ];
         for (const group of SYNONYMS) {
-          const inGroup = group.some((item) => norm(item) === normWanted || normWanted.includes(norm(item)) || norm(item).includes(normWanted));
+          const inGroup = group.some((item) => {
+            const n = norm(item);
+            return n === normWanted || (n.length >= 2 && normWanted.length >= 2 && (normWanted.includes(n) || n.includes(normWanted)));
+          });
           if (inGroup) {
             for (const item of group) {
               const normItem = norm(item);
               const found = candidates.find((c) => {
                 const normText = norm(c.text);
-                return normText === normItem || normText.includes(normItem) || normItem.includes(normText);
+                return normText === normItem || (normText.length >= 2 && normItem.length >= 2 && (normText.includes(normItem) || normItem.includes(normText)));
               });
               if (found) {
                 matchedOption = found;
@@ -295,7 +366,7 @@ export function fillField(ref: string, value: string): FillReceipt {
         }
       }
 
-      // 3. Location partial match (e.g. wanted is "湖北省武汉市", option is "湖北" or "武汉市")
+      // 4. Location partial match (e.g. wanted is "湖北省武汉市", option is "湖北" or "武汉市")
       if (!matchedOption) {
         const PROVINCES = ["北京", "天津", "河北", "山西", "内蒙古", "辽宁", "吉林", "黑龙江", "上海", "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南", "湖北", "湖南", "广东", "广西", "海南", "重庆", "四川", "贵州", "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆", "香港", "澳门", "台湾"];
         for (const prov of PROVINCES) {
@@ -312,7 +383,7 @@ export function fillField(ref: string, value: string): FillReceipt {
         }
       }
 
-      // 4. Substring / inclusion match (longest option match first)
+      // 5. Substring / inclusion match (longest option match first)
       if (!matchedOption) {
         const sorted = [...candidates].sort((a, b) => b.text.length - a.text.length);
         matchedOption = sorted.find((c) => {
@@ -346,6 +417,7 @@ export function fillField(ref: string, value: string): FillReceipt {
       const wanted = /^(是|有|true|yes|1|已婚|男)$/i.test(expected);
       if (element.checked !== wanted) element.click();
     } else if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      if (typeof element.focus === "function") element.focus();
       const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
       if (!setter) return { ok: false, message: "浏览器不允许写入该控件" };

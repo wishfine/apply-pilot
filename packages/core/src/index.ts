@@ -113,6 +113,32 @@ export function extractLocationComponents(rawAddress: unknown): LocationComponen
   return { province: province || str, city: city || str, district: district || city || str };
 }
 
+export type DateComponents = {
+  year: string;
+  month: string;
+  day: string;
+};
+
+export function parseDateComponents(rawDate: unknown): DateComponents {
+  if (!rawDate) return { year: "", month: "", day: "" };
+  if (typeof rawDate === "object") {
+    const obj = rawDate as { year?: number | string; month?: number | string; day?: number | string };
+    const y = obj.year ? String(obj.year).trim() : "";
+    const m = obj.month !== undefined && obj.month !== null && String(obj.month).trim() !== "" ? String(obj.month).padStart(2, "0") : "";
+    const d = obj.day !== undefined && obj.day !== null && String(obj.day).trim() !== "" ? String(obj.day).padStart(2, "0") : "";
+    return { year: y, month: m, day: d };
+  }
+  const str = String(rawDate).trim();
+  const match = str.match(/^(\d{4})[-/.\s年]?(\d{1,2})?[-/.\s月]?(\d{1,2})?日?$/);
+  if (match) {
+    const year = match[1] || "";
+    const month = match[2] ? match[2].padStart(2, "0") : "";
+    const day = match[3] ? match[3].padStart(2, "0") : "";
+    return { year, month, day };
+  }
+  return { year: "", month: "", day: "" };
+}
+
 export const SYNONYM_GROUPS: string[][] = [
   // 政治面貌
   ["中国共产党党员", "中共党员", "党员"],
@@ -181,22 +207,36 @@ export function matchOptionText(options: string[], targetValue: unknown): string
   const exact = validOptions.find((opt) => normalize(opt) === normTarget);
   if (exact) return exact;
 
-  // 2. Synonym groups lookup
+  // 2. Numeric / Date component matching (e.g. "05" matches "5", "05", "5月", "05月"; "2001" matches "2001", "2001年")
+  const targetDigits = normTarget.replace(/\D/g, "");
+  if (targetDigits.length > 0 && targetDigits.length <= 4) {
+    const targetNum = parseInt(targetDigits, 10);
+    const numMatch = validOptions.find((opt) => {
+      const optDigits = normalize(opt).replace(/\D/g, "");
+      return optDigits.length > 0 && parseInt(optDigits, 10) === targetNum;
+    });
+    if (numMatch) return numMatch;
+  }
+
+  // 3. Synonym groups lookup
   for (const group of SYNONYM_GROUPS) {
-    const targetInGroup = group.some((item) => normalize(item) === normTarget || normTarget.includes(normalize(item)) || normalize(item).includes(normTarget));
+    const targetInGroup = group.some((item) => {
+      const normItem = normalize(item);
+      return normItem === normTarget || (normItem.length >= 2 && normTarget.length >= 2 && (normTarget.includes(normItem) || normItem.includes(normTarget)));
+    });
     if (targetInGroup) {
       for (const item of group) {
         const normItem = normalize(item);
         const matched = validOptions.find((opt) => {
           const normOpt = normalize(opt);
-          return normOpt === normItem || normOpt.includes(normItem) || normItem.includes(normOpt);
+          return normOpt === normItem || (normOpt.length >= 2 && normItem.length >= 2 && (normOpt.includes(normItem) || normItem.includes(normOpt)));
         });
         if (matched) return matched;
       }
     }
   }
 
-  // 3. Location matching: check if target is location and option is province/city
+  // 4. Location matching: check if target is location and option is province/city
   const loc = extractLocationComponents(rawTarget);
   if (loc.province) {
     const provShort = loc.province.replace(/省|市|自治区|特别行政区/g, "");
@@ -215,7 +255,7 @@ export function matchOptionText(options: string[], targetValue: unknown): string
     if (cityMatch) return cityMatch;
   }
 
-  // 4. Substring inclusion match (longer options preferred)
+  // 5. Substring inclusion match (longer options preferred)
   const sorted = [...validOptions].sort((a, b) => b.length - a.length);
   const inclusion = sorted.find((opt) => {
     const normOpt = normalize(opt);
@@ -239,6 +279,17 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "证件号码": { path: "identity.id_number", value: (p) => p.identity?.id_number },
   "证件编号": { path: "identity.id_number", value: (p) => p.identity?.id_number },
   "出生日期": { path: "identity.birth_date", value: (p) => display(p.identity?.birth_date) },
+  "出生年月": { path: "identity.birth_date", value: (p) => display(p.identity?.birth_date) },
+  "出生时间": { path: "identity.birth_date", value: (p) => display(p.identity?.birth_date) },
+  "生日": { path: "identity.birth_date", value: (p) => display(p.identity?.birth_date) },
+  "出生年份": { path: "identity.birth_date[year]", value: (p) => parseDateComponents(p.identity?.birth_date).year },
+  "出生日期年份": { path: "identity.birth_date[year]", value: (p) => parseDateComponents(p.identity?.birth_date).year },
+  "出生年": { path: "identity.birth_date[year]", value: (p) => parseDateComponents(p.identity?.birth_date).year },
+  "出生月份": { path: "identity.birth_date[month]", value: (p) => parseDateComponents(p.identity?.birth_date).month },
+  "出生日期月份": { path: "identity.birth_date[month]", value: (p) => parseDateComponents(p.identity?.birth_date).month },
+  "出生月": { path: "identity.birth_date[month]", value: (p) => parseDateComponents(p.identity?.birth_date).month },
+  "出生日": { path: "identity.birth_date[day]", value: (p) => parseDateComponents(p.identity?.birth_date).day },
+  "出生日期日": { path: "identity.birth_date[day]", value: (p) => parseDateComponents(p.identity?.birth_date).day },
   "出生地": { path: "identity.birth_place", value: (p) => p.identity?.birth_place || p.soe_extended?.native_place },
   "出生地点": { path: "identity.birth_place", value: (p) => p.identity?.birth_place || p.soe_extended?.native_place },
   "证件有效期": { path: "identity.id_expiry_date", value: (p) => p.identity?.id_expiry_date },
@@ -346,7 +397,14 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "计算机等级": { path: "soe_extended.computer_proficiency", value: (p) => p.soe_extended?.computer_proficiency },
   "普通话等级": { path: "soe_extended.mandarin_level", value: (p) => p.soe_extended?.mandarin_level },
   "普通话水平": { path: "soe_extended.mandarin_level", value: (p) => p.soe_extended?.mandarin_level },
-  "毕业年份": { path: "campus_context.graduation_year", value: (p) => p.campus_context?.graduation_year },
+  "毕业年份": { path: "campus_context.graduation_year", value: (p) => p.campus_context?.graduation_year || parseDateComponents(highest(p.education)?.end_date).year },
+  "毕业月份": { path: "campus_context.graduation_month", value: (p) => p.campus_context?.graduation_month || parseDateComponents(highest(p.education)?.end_date).month },
+  "毕业年": { path: "campus_context.graduation_year", value: (p) => p.campus_context?.graduation_year || parseDateComponents(highest(p.education)?.end_date).year },
+  "毕业月": { path: "campus_context.graduation_month", value: (p) => p.campus_context?.graduation_month || parseDateComponents(highest(p.education)?.end_date).month },
+  "入学年份": { path: "education[highest].start_date[year]", value: (p) => parseDateComponents(highest(p.education)?.start_date).year },
+  "入学月份": { path: "education[highest].start_date[month]", value: (p) => parseDateComponents(highest(p.education)?.start_date).month },
+  "入学年": { path: "education[highest].start_date[year]", value: (p) => parseDateComponents(highest(p.education)?.start_date).year },
+  "入学月": { path: "education[highest].start_date[month]", value: (p) => parseDateComponents(highest(p.education)?.start_date).month },
   "四级成绩": { path: "campus_context.cet4_score", value: (p) => p.campus_context?.cet4_score },
   "六级成绩": { path: "campus_context.cet6_score", value: (p) => p.campus_context?.cet6_score },
   "四级分数": { path: "campus_context.cet4_score", value: (p) => p.campus_context?.cet4_score },
@@ -589,6 +647,9 @@ function findKey(field: PageField, rules: Record<string, unknown>) {
   const isReferrer = fullValue.includes("推荐") || fullValue.includes("内推");
   const isFamily = fullValue.includes("父亲") || fullValue.includes("母亲") || fullValue.includes("配偶") || fullValue.includes("子女") || fullValue.includes("家属");
   const isSupervisor = fullValue.includes("证明人") || fullValue.includes("导师") || fullValue.includes("领导");
+  const isBirth = fullValue.includes("出生") || fullValue.includes("生日");
+  const isGraduation = fullValue.includes("毕业") || fullValue.includes("离校");
+  const isAdmission = fullValue.includes("入学");
 
   // 4. Find all candidate keys that are substrings of fullValue
   const candidateKeys = Object.keys(rules).filter((key) => {
@@ -601,6 +662,9 @@ function findKey(field: PageField, rules: Record<string, unknown>) {
     if (isReferrer && !normK.includes("推荐") && !normK.includes("内推")) return false;
     if (isFamily && !normK.includes("父") && !normK.includes("母") && !normK.includes("配偶") && !normK.includes("子女")) return false;
     if (isSupervisor) return false;
+    if (isBirth && (normK.includes("毕业") || normK.includes("入学"))) return false;
+    if (isGraduation && (normK.includes("出生") || normK.includes("生日"))) return false;
+    if (isAdmission && (normK.includes("出生") || normK.includes("生日") || normK.includes("毕业"))) return false;
 
     return true;
   });
@@ -726,27 +790,37 @@ export function mapFields(fields: PageField[], profile?: CandidateProfile, secti
     let value = recordIndex === undefined ? selected.rule.value(profile) : valueForRecord(selected.rule, profile, selected.source, recordIndex);
 
     // Multi-select location cascade handling:
-    if (field.kind === "select" && (selected.rule.path === "soe_extended.native_place" || selected.rule.path.startsWith("soe_extended.native_place["))) {
+    if (field.kind === "select" && selected.rule.path === "soe_extended.native_place") {
       const loc = extractLocationComponents(profile?.soe_extended?.native_place);
       const locIndex = occurrences["cascade:native_place"] || 0;
       occurrences["cascade:native_place"] = locIndex + 1;
       if (locIndex === 0) value = loc.province;
       else if (locIndex === 1) value = loc.city;
       else value = loc.district;
-    } else if (field.kind === "select" && (selected.rule.path === "soe_extended.household_registration" || selected.rule.path.startsWith("soe_extended.household_registration["))) {
+    } else if (field.kind === "select" && selected.rule.path === "soe_extended.household_registration") {
       const loc = extractLocationComponents(profile?.soe_extended?.household_registration);
       const locIndex = occurrences["cascade:household_registration"] || 0;
       occurrences["cascade:household_registration"] = locIndex + 1;
       if (locIndex === 0) value = loc.province;
       else if (locIndex === 1) value = loc.city;
       else value = loc.district;
-    } else if (field.kind === "select" && (selected.rule.path === "contact.current_city" || selected.rule.path.startsWith("contact.current_city["))) {
+    } else if (field.kind === "select" && selected.rule.path === "contact.current_city") {
       const loc = extractLocationComponents(profile?.contact?.current_city || profile?.contact?.current_address);
       const locIndex = occurrences["cascade:current_city"] || 0;
       occurrences["cascade:current_city"] = locIndex + 1;
       if (locIndex === 0) value = loc.province;
       else if (locIndex === 1) value = loc.city;
       else value = loc.district;
+    }
+
+    // Multi-select date cascade handling:
+    if (field.kind === "select" && selected.rule.path === "identity.birth_date") {
+      const parts = parseDateComponents(profile?.identity?.birth_date);
+      const dateIndex = occurrences["cascade:birth_date"] || 0;
+      occurrences["cascade:birth_date"] = dateIndex + 1;
+      if (dateIndex === 0) value = parts.year;
+      else if (dateIndex === 1) value = parts.month;
+      else value = parts.day;
     }
 
     // Compound fields: Select for ID number is actually ID type!

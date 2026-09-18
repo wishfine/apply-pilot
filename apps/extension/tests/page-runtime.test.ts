@@ -189,4 +189,89 @@ describe("page runtime", () => {
     expect(fillCity.ok).toBe(true);
     expect(document.querySelector<HTMLSelectElement>("#city")?.value).toBe("bj-dc");
   });
+
+  it("disambiguates table layout compound controls for ID number and mobile phone with required marking", () => {
+    document.body.innerHTML = `
+      <table>
+        <tr>
+          <td><span class="required">*</span> 身份证号</td>
+          <td>
+            <select id="id-type">
+              <option value="id">国内身份证或护照（含港澳台）</option>
+              <option value="passport">护照</option>
+            </select>
+            <input id="id-num" type="text" />
+          </td>
+        </tr>
+        <tr>
+          <td><span class="required">*</span> 手机号码</td>
+          <td>
+            <select id="mobile-code">
+              <option value="86">中国大陆（+86）</option>
+              <option value="other">其他地区</option>
+            </select>
+            <input id="mobile-num" type="text" />
+            <div>手机号码用于接收应聘相关信息，请务必正确填写。</div>
+          </td>
+        </tr>
+      </table>
+    `;
+    const scan = scanPage();
+    expect(scan.fields.map((f) => f.label)).toEqual([
+      "证件类型",
+      "* 身份证号",
+      "手机区号",
+      "* 手机号码",
+    ]);
+    expect(scan.fields.map((f) => f.required)).toEqual([true, true, true, true]);
+
+    const fillId = fillField(scan.fields[1].ref, "110101200105152345");
+    expect(fillId.ok).toBe(true);
+    expect(document.querySelector<HTMLInputElement>("#id-num")?.value).toBe("110101200105152345");
+
+    const fillMobile = fillField(scan.fields[3].ref, "13800138000");
+    expect(fillMobile.ok).toBe(true);
+    expect(document.querySelector<HTMLInputElement>("#mobile-num")?.value).toBe("13800138000");
+  });
+
+  it("disambiguates split dropdowns for date of birth and fills year and month correctly", () => {
+    document.body.innerHTML = `
+      <table>
+        <tr>
+          <td><span class="star">*</span> 出生日期</td>
+          <td>
+            <select id="birth-year">
+              <option value="">请选择</option>
+              <option value="2028">2028年</option>
+              <option value="2027">2027年</option>
+              <option value="2001">2001年</option>
+              <option value="2000">2000年</option>
+            </select>
+            年
+            <select id="birth-month">
+              <option value="">请选择</option>
+              <option value="01">01月</option>
+              <option value="02">02月</option>
+              <option value="05">05月</option>
+              <option value="12">12月</option>
+            </select>
+            月
+          </td>
+        </tr>
+      </table>
+    `;
+    const scan = scanPage();
+    expect(scan.fields.map((f) => f.label)).toEqual(["出生年份", "出生月份"]);
+    expect(scan.fields.map((f) => f.required)).toEqual([true, true]);
+
+    // Test filling year with "2001" matching "2001年"
+    const fillYear = fillField(scan.fields[0].ref, "2001");
+    expect(fillYear.ok).toBe(true);
+    expect(document.querySelector<HTMLSelectElement>("#birth-year")?.value).toBe("2001");
+
+    // Test filling month with "05" matching "05月"
+    const fillMonth = fillField(scan.fields[1].ref, "05");
+    expect(fillMonth.ok).toBe(true);
+    expect(document.querySelector<HTMLSelectElement>("#birth-month")?.value).toBe("05");
+  });
 });
