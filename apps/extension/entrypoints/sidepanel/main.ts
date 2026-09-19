@@ -2,7 +2,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { applyHarvestedFields, harvestPageFields, mapFields, parseCandidateProfile, type CandidateProfile, type FieldPlan, type HarvestedField } from "../../../../packages/core/src/index";
 import { OperationStore, ProfileStore } from "../../../../packages/storage/src/index";
 import { applyApiPlan, DEFAULT_API_ENDPOINT, isLoopbackEndpoint, requestFormPlan, validateApplyPilotEndpoint } from "../../runtime/api";
-import { clickSection, clearFileBuffer, fillField, fillFileChunk, installHarvestInterceptor, scanPage, type FilePayload, type FillReceipt, type PageScan, type PageSection } from "../../runtime/page";
+import { clickSection, clearFileBuffer, fillField, fillFileChunk, scanPage, type FilePayload, type FillReceipt, type PageScan, type PageSection } from "../../runtime/page";
 import "../../styles/sidepanel.css";
 
 const store = new ProfileStore();
@@ -175,9 +175,6 @@ async function scan() {
     await loadApiSettings();
     await refreshPlanFromApi();
     state.receipts = {};
-    if (tab.id) {
-      void chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func: installHarvestInterceptor }).catch(() => undefined);
-    }
   } catch (error) { state.error = explainBrowserError(error, "扫描页面失败"); }
   finally { state.busy = false; render(); }
 }
@@ -191,7 +188,10 @@ async function fill() {
   }
   state.busy = true; state.error = undefined; render();
   try {
-    for (const item of state.plan.filter((candidate) => candidate.decision === "fill" && candidate.proposedValue !== undefined)) {
+    const fillItems = state.plan.filter((candidate) => candidate.decision === "fill" && candidate.proposedValue !== undefined);
+    // Fill non-select fields first, then selects last — selects can trigger cascading DOM changes
+    const ordered = [...fillItems.filter((item) => item.field.kind !== "select"), ...fillItems.filter((item) => item.field.kind === "select")];
+    for (const item of ordered) {
       const receiptKey = `${item.field.frameId ?? 0}:${item.field.ref}`;
       if (state.receipts[receiptKey]?.ok) continue;
       const value = item.proposedValue;
@@ -228,9 +228,6 @@ async function fill() {
         throw error;
       }
       render();
-    }
-    if (state.activeTab?.id) {
-      void chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, allFrames: true }, func: installHarvestInterceptor }).catch(() => undefined);
     }
   } catch (error) { state.error = explainBrowserError(error, "填写失败"); }
   finally { state.busy = false; render(); }

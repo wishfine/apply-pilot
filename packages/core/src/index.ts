@@ -465,6 +465,89 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "班级": { path: "education[highest].class_name", value: (p) => highest(p.education)?.class_name },
   "所在班级": { path: "education[highest].class_name", value: (p) => highest(p.education)?.class_name },
   "学号": { path: "education[highest].student_id", value: (p) => highest(p.education)?.student_id },
+
+  // 本科
+  "本科学校名称": { path: "education[bachelor].school_name", value: (p) => educationForLevel(p.education, "bachelor")?.school_name },
+  "本科毕业院校": { path: "education[bachelor].school_name", value: (p) => educationForLevel(p.education, "bachelor")?.school_name },
+  "本科学校": { path: "education[bachelor].school_name", value: (p) => educationForLevel(p.education, "bachelor")?.school_name },
+  "本科院校": { path: "education[bachelor].school_name", value: (p) => educationForLevel(p.education, "bachelor")?.school_name },
+  "本科毕业学校": { path: "education[bachelor].school_name", value: (p) => educationForLevel(p.education, "bachelor")?.school_name },
+  "本科专业": { path: "education[bachelor].major", value: (p) => educationForLevel(p.education, "bachelor")?.major },
+  "本科专业名称": { path: "education[bachelor].major", value: (p) => educationForLevel(p.education, "bachelor")?.major },
+  "本科所学专业": { path: "education[bachelor].major", value: (p) => educationForLevel(p.education, "bachelor")?.major },
+  "本科院系": { path: "education[bachelor].department", value: (p) => educationForLevel(p.education, "bachelor")?.department },
+  "本科学院": { path: "education[bachelor].department", value: (p) => educationForLevel(p.education, "bachelor")?.department },
+  "本科学院名称": { path: "education[bachelor].department", value: (p) => educationForLevel(p.education, "bachelor")?.department },
+  "本科院系名称": { path: "education[bachelor].department", value: (p) => educationForLevel(p.education, "bachelor")?.department },
+  "本科入学时间": { path: "education[bachelor].start_date", value: (p) => display(educationForLevel(p.education, "bachelor")?.start_date) },
+  "本科开始时间": { path: "education[bachelor].start_date", value: (p) => display(educationForLevel(p.education, "bachelor")?.start_date) },
+  "本科入学日期": { path: "education[bachelor].start_date", value: (p) => display(educationForLevel(p.education, "bachelor")?.start_date) },
+  "本科开始日期": { path: "education[bachelor].start_date", value: (p) => display(educationForLevel(p.education, "bachelor")?.start_date) },
+  "本科毕业时间": { path: "education[bachelor].end_date", value: (p) => display(educationForLevel(p.education, "bachelor")?.end_date) },
+  "本科结束时间": { path: "education[bachelor].end_date", value: (p) => display(educationForLevel(p.education, "bachelor")?.end_date) },
+  "本科毕业日期": { path: "education[bachelor].end_date", value: (p) => display(educationForLevel(p.education, "bachelor")?.end_date) },
+  "本科结束日期": { path: "education[bachelor].end_date", value: (p) => display(educationForLevel(p.education, "bachelor")?.end_date) },
+  "本科学制": { path: "education[bachelor].school_system", value: (p) => educationForLevel(p.education, "bachelor")?.school_system },
+  "本科学位": { path: "education[bachelor].academic_degree", value: (p) => educationForLevel(p.education, "bachelor")?.academic_degree },
+  "本科学历": { path: "education[bachelor].education_level", value: (p) => educationForLevel(p.education, "bachelor")?.education_level },
+  "本科绩点": { path: "education[bachelor].gpa", value: (p) => educationForLevel(p.education, "bachelor")?.gpa },
+  "本科gpa": { path: "education[bachelor].gpa", value: (p) => educationForLevel(p.education, "bachelor")?.gpa },
+  "本科学习方式": { path: "education[bachelor].study_mode", value: (p) => educationForLevel(p.education, "bachelor")?.study_mode },
+  "本科受教育类型": { path: "education[bachelor].study_mode", value: (p) => educationForLevel(p.education, "bachelor")?.study_mode },
+
+  // 硕士 / 研究生
+  "硕士学校名称": { path: "education[master].school_name", value: (p) => educationForLevel(p.education, "master")?.school_name },
+  "硕士毕业院校": { path: "education[master].school_name", value: (p) => educationForLevel(p.education, "master")?.school_name },
+  "硕士学校": { path: "education[master].school_name", value: (p) => educationForLevel(p.education, "master")?.school_name },
+  "硕士院校": { path: "education[master].school_name", value: (p) => educationForLevel(p.education, "master")?.school_name },
+  "硕士毕业学校": { path: "education[master].school_name", value: (p) => educationForLevel(p.education, "master")?.school_name },
+  "研究生毕业院校": { path: "education[master].school_name", value: (p) => educationForLevel(p.education, "master")?.school_name },
+  "研究生院校": { path: "education[master].school_name", value: (p) => educationForLevel(p.education, "master")?.school_name },
+  "硕士专业": { path: "education[master].major", value: (p) => educationForLevel(p.education, "master")?.major },
+  "硕士专业名称": { path: "education[master].major", value: (p) => educationForLevel(p.education, "master")?.major },
+  "硕士所学专业": { path: "education[master].major", value: (p) => educationForLevel(p.education, "master")?.major },
+  "研究生专业": { path: "education[master].major", value: (p) => educationForLevel(p.education, "master")?.major },
+  "硕士院系": { path: "education[master].department", value: (p) => educationForLevel(p.education, "master")?.department },
+  "硕士学院": { path: "education[master].department", value: (p) => educationForLevel(p.education, "master")?.department },
+  "硕士学院名称": { path: "education[master].department", value: (p) => educationForLevel(p.education, "master")?.department },
+  "研究生院系": { path: "education[master].department", value: (p) => educationForLevel(p.education, "master")?.department },
+  "硕士入学时间": { path: "education[master].start_date", value: (p) => display(educationForLevel(p.education, "master")?.start_date) },
+  "硕士开始时间": { path: "education[master].start_date", value: (p) => display(educationForLevel(p.education, "master")?.start_date) },
+  "研究生入学时间": { path: "education[master].start_date", value: (p) => display(educationForLevel(p.education, "master")?.start_date) },
+  "硕士毕业时间": { path: "education[master].end_date", value: (p) => display(educationForLevel(p.education, "master")?.end_date) },
+  "硕士结束时间": { path: "education[master].end_date", value: (p) => display(educationForLevel(p.education, "master")?.end_date) },
+  "研究生毕业时间": { path: "education[master].end_date", value: (p) => display(educationForLevel(p.education, "master")?.end_date) },
+  "硕士学制": { path: "education[master].school_system", value: (p) => educationForLevel(p.education, "master")?.school_system },
+  "硕士学位": { path: "education[master].academic_degree", value: (p) => educationForLevel(p.education, "master")?.academic_degree },
+  "硕士学历": { path: "education[master].education_level", value: (p) => educationForLevel(p.education, "master")?.education_level },
+  "硕士绩点": { path: "education[master].gpa", value: (p) => educationForLevel(p.education, "master")?.gpa },
+  "硕士gpa": { path: "education[master].gpa", value: (p) => educationForLevel(p.education, "master")?.gpa },
+
+  // 高中
+  "高中毕业学校": { path: "education[high_school].school_name", value: (p) => educationForLevel(p.education, "high_school")?.school_name },
+  "高中学校名称": { path: "education[high_school].school_name", value: (p) => educationForLevel(p.education, "high_school")?.school_name },
+  "高中学校": { path: "education[high_school].school_name", value: (p) => educationForLevel(p.education, "high_school")?.school_name },
+  "高中院校": { path: "education[high_school].school_name", value: (p) => educationForLevel(p.education, "high_school")?.school_name },
+  "高中开始时间": { path: "education[high_school].start_date", value: (p) => display(educationForLevel(p.education, "high_school")?.start_date) },
+  "高中入学时间": { path: "education[high_school].start_date", value: (p) => display(educationForLevel(p.education, "high_school")?.start_date) },
+  "高中入学日期": { path: "education[high_school].start_date", value: (p) => display(educationForLevel(p.education, "high_school")?.start_date) },
+  "高中毕业时间": { path: "education[high_school].end_date", value: (p) => display(educationForLevel(p.education, "high_school")?.end_date) },
+  "高中毕业日期": { path: "education[high_school].end_date", value: (p) => display(educationForLevel(p.education, "high_school")?.end_date) },
+  "高中结束时间": { path: "education[high_school].end_date", value: (p) => display(educationForLevel(p.education, "high_school")?.end_date) },
+
+  // 博士
+  "博士学校名称": { path: "education[doctor].school_name", value: (p) => educationForLevel(p.education, "doctor")?.school_name },
+  "博士毕业院校": { path: "education[doctor].school_name", value: (p) => educationForLevel(p.education, "doctor")?.school_name },
+  "博士学校": { path: "education[doctor].school_name", value: (p) => educationForLevel(p.education, "doctor")?.school_name },
+  "博士院校": { path: "education[doctor].school_name", value: (p) => educationForLevel(p.education, "doctor")?.school_name },
+  "博士专业": { path: "education[doctor].major", value: (p) => educationForLevel(p.education, "doctor")?.major },
+  "博士专业名称": { path: "education[doctor].major", value: (p) => educationForLevel(p.education, "doctor")?.major },
+  "博士院系": { path: "education[doctor].department", value: (p) => educationForLevel(p.education, "doctor")?.department },
+  "博士学院": { path: "education[doctor].department", value: (p) => educationForLevel(p.education, "doctor")?.department },
+  "博士入学时间": { path: "education[doctor].start_date", value: (p) => display(educationForLevel(p.education, "doctor")?.start_date) },
+  "博士开始时间": { path: "education[doctor].start_date", value: (p) => display(educationForLevel(p.education, "doctor")?.start_date) },
+  "博士毕业时间": { path: "education[doctor].end_date", value: (p) => display(educationForLevel(p.education, "doctor")?.end_date) },
+  "博士结束时间": { path: "education[doctor].end_date", value: (p) => display(educationForLevel(p.education, "doctor")?.end_date) },
 };
 
 const experienceAliases: Record<string, { path: string; value: (profile: CandidateProfile) => unknown }> = {
@@ -563,6 +646,19 @@ function display(value: unknown): unknown {
   if (date.day && date.month) return `${date.year}-${String(date.month).padStart(2, "0")}-${String(date.day).padStart(2, "0")}`;
   if (date.month) return `${date.year}-${String(date.month).padStart(2, "0")}`;
   return String(date.year);
+}
+
+function educationForLevel(records: Array<Record<string, unknown>> | undefined, targetLevel: "doctor" | "master" | "bachelor" | "associate" | "high_school"): Record<string, unknown> | undefined {
+  if (!records || !records.length) return undefined;
+  return records.find((rec) => {
+    const level = String(rec.education_level || "").toLowerCase();
+    if (targetLevel === "doctor") return level.includes("doctor") || level.includes("博");
+    if (targetLevel === "master") return level.includes("master") || level.includes("硕") || level.includes("研");
+    if (targetLevel === "bachelor") return level.includes("bachelor") || level.includes("本");
+    if (targetLevel === "associate") return level.includes("associate") || level.includes("专");
+    if (targetLevel === "high_school") return level.includes("high") || level.includes("高") || level.includes("中专");
+    return false;
+  });
 }
 
 function highest(records: Array<Record<string, unknown>> | undefined) {
@@ -678,6 +774,26 @@ function findKey(field: PageField, rules: Record<string, unknown>) {
     if (isBirth && (normK.includes("毕业") || normK.includes("入学"))) return false;
     if (isGraduation && (normK.includes("出生") || normK.includes("生日"))) return false;
     if (isAdmission && (normK.includes("出生") || normK.includes("生日") || normK.includes("毕业"))) return false;
+
+    // Guardrail filtering: level-specific education cannot match other levels or generic highest
+    const isBachelor = fullValue.includes("本科") || fullValue.includes("学士");
+    const isMaster = fullValue.includes("硕士") || fullValue.includes("研究生");
+    const isHighSchool = fullValue.includes("高中") || fullValue.includes("中专");
+    const isDoctor = fullValue.includes("博士");
+
+    if (isBachelor && (normK.includes("硕士") || normK.includes("高中") || normK.includes("博士") || normK.includes("研究生"))) return false;
+    if (isMaster && (normK.includes("本科") || normK.includes("学士") || normK.includes("高中") || normK.includes("博士"))) return false;
+    if (isHighSchool && (normK.includes("本科") || normK.includes("学士") || normK.includes("硕士") || normK.includes("博士") || normK.includes("研究生"))) return false;
+    if (isDoctor && (normK.includes("本科") || normK.includes("学士") || normK.includes("硕士") || normK.includes("高中") || normK.includes("研究生"))) return false;
+
+    // If label explicitly mentions a specific level, DO NOT match a generic rule if any level-specific rule exists
+    if ((isBachelor || isMaster || isHighSchool || isDoctor) && !normK.includes("本科") && !normK.includes("学士") && !normK.includes("硕士") && !normK.includes("研究生") && !normK.includes("高中") && !normK.includes("博士")) {
+      const hasSpecificRule = Object.keys(rules).some((r) => {
+        const nr = normalize(r);
+        return fullValue.includes(nr) && ((isBachelor && (nr.includes("本科") || nr.includes("学士"))) || (isMaster && (nr.includes("硕士") || nr.includes("研究生"))) || (isHighSchool && nr.includes("高中")) || (isDoctor && nr.includes("博士")));
+      });
+      if (hasSpecificRule) return false;
+    }
 
     return true;
   });
@@ -803,7 +919,8 @@ export function mapFields(fields: PageField[], profile?: CandidateProfile, secti
     return experienceSlotIndices[slot];
   };
   return fields.map((field) => {
-    if (field.value.trim()) return { field, decision: "skip", reason: "已有内容，已保留" };
+    const isExistingFilled = field.value.trim() && !/^[-—_/\s]+$/.test(field.value.trim()) && !/^[-—_/\s]*(请选择|选择|未选择|select)[-—_/\s.]*$/i.test(field.value.trim());
+    if (isExistingFilled) return { field, decision: "skip", reason: "已有内容，已保留" };
     if (!field.required) return { field, decision: "skip", reason: "选填项，按要求留空" };
     if (!profile) return { field, decision: "review", reason: "请先导入候选人资料" };
     const selected = fieldRule(field, section, profile);
@@ -980,6 +1097,8 @@ function formatValue(path: string, value: unknown, field?: PageField, profile?: 
   if (path.endsWith("education_level")) {
     return ({ high_school: "高中", associate: "专科", bachelor: "本科", master: "硕士", doctor: "博士" } as Record<string, string>)[displayed.toLowerCase()] || displayed;
   }
+  // Do NOT reformat already-extracted date components (year/month/day from split selects)
+  if (/\[(year|month|day)\]/.test(path)) return displayed;
   if (isDateLikePath(path) || /^\d{4}[-/.]\d{2}(?:[-/.]\d{2})?$/.test(displayed.trim())) {
     return formatDateWithFieldClues(displayed, field);
   }

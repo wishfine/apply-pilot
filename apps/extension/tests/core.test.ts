@@ -582,6 +582,98 @@ describe("extension field planning", () => {
       expect(updated.contact?.emergency_contact_phone).toBe("13900139000");
       expect((updated.soe_extended?.custom_fields as Record<string, unknown>)?.[`特殊体貌特征`]).toBe("无");
     });
+
+    it("does not skip fields whose initial value is placeholder dashes or text like '----' or '--'", () => {
+      const candidateProfile = {
+        ...profile,
+        identity: {
+          ...profile.identity,
+          birth_date: "2001-05-15",
+        },
+      };
+
+      const fields: PageField[] = [
+        {
+          ref: "byear",
+          label: "出生年份",
+          name: "birthYear",
+          kind: "select",
+          type: "select",
+          required: true,
+          value: "----",
+          options: ["----", "2002", "2001", "2000"],
+        },
+        {
+          ref: "bmonth",
+          label: "出生月份",
+          name: "birthMonth",
+          kind: "select",
+          type: "select",
+          required: true,
+          value: "--",
+          options: ["--", "04", "05", "06"],
+        },
+      ];
+
+      const plan = mapFields(fields, candidateProfile);
+      expect(plan[0].decision).toBe("fill");
+      expect(plan[0].proposedValue).toBe("2001");
+      expect(plan[1].decision).toBe("fill");
+      expect(plan[1].proposedValue).toBe("05");
+    });
+
+    it("correctly maps level-specific education fields for bachelor and high school", () => {
+      const candidateProfile = {
+        ...profile,
+        education: [
+          {
+            id: "edu-master",
+            school_name: "清华大学",
+            education_level: "master",
+            academic_degree: "硕士",
+            major: "计算机科学与技术",
+            department: "计算机系",
+            start_date: "2023-09",
+            end_date: "2026-06",
+          },
+          {
+            id: "edu-bachelor",
+            school_name: "北京大学",
+            education_level: "bachelor",
+            academic_degree: "学士",
+            major: "软件工程",
+            department: "信息工程学院",
+            start_date: "2019-09",
+            end_date: "2023-06",
+          },
+          {
+            id: "edu-hs",
+            school_name: "衡水中学",
+            education_level: "high_school",
+            start_date: "2016-09",
+            end_date: "2019-06",
+          },
+        ],
+      };
+
+      const fields: PageField[] = [
+        { ref: "f1", label: "本科学校名称", name: "bSchool", kind: "text", type: "text", required: true, value: "", options: [] },
+        { ref: "f2", label: "本科专业", name: "bMajor", kind: "text", type: "text", required: true, value: "", options: [] },
+        { ref: "f3", label: "本科入学时间", name: "bStart", kind: "text", type: "text", required: true, value: "", options: [] },
+        { ref: "f4", label: "本科毕业时间", name: "bEnd", kind: "text", type: "text", required: true, value: "", options: [] },
+        { ref: "f5", label: "高中毕业学校", name: "hSchool", kind: "text", type: "text", required: true, value: "", options: [] },
+        { ref: "f6", label: "高中开始时间", name: "hStart", kind: "text", type: "text", required: true, value: "", options: [] },
+      ];
+
+      const plan = mapFields(fields, candidateProfile);
+      expect(plan[0].proposedValue).toBe("北京大学");
+      expect(plan[1].proposedValue).toBe("软件工程");
+      expect(plan[2].proposedValue).toBe("2019-09");
+      expect(plan[3].proposedValue).toBe("2023-06");
+      expect(plan[4].proposedValue).toBe("衡水中学");
+      expect(plan[5].proposedValue).toBe("2016-09");
+      expect(plan.every((item) => item.decision === "fill")).toBe(true);
+    });
   });
 });
 
