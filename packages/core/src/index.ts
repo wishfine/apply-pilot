@@ -45,6 +45,22 @@ export function parseCandidateProfile(input: unknown): CandidateProfile {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("资料文件必须是对象");
   const profile = input as Record<string, unknown>;
   if (typeof profile.profile_id !== "string" || !profile.profile_id.trim()) throw new Error("资料缺少 profile_id");
+
+  // Auto-migrate legacy rogue education[xxx] keys if present
+  for (const level of ["bachelor", "master", "high_school", "doctor", "associate"]) {
+    const rogueKey = `education[${level}]`;
+    if (profile[rogueKey] && typeof profile[rogueKey] === "object") {
+      if (!Array.isArray(profile.education)) profile.education = [];
+      let existing = (profile.education as Array<Record<string, unknown>>).find((e) => String(e.education_level || "").toLowerCase().includes(level));
+      if (!existing) {
+        existing = { id: `edu_${level}`, education_level: level, school_name: "", major: "" };
+        (profile.education as Array<Record<string, unknown>>).push(existing);
+      }
+      Object.assign(existing, profile[rogueKey]);
+      delete profile[rogueKey];
+    }
+  }
+
   for (const key of ["identity", "contact", "campus_context", "soe_extended"] as const) {
     if (profile[key] !== undefined && (typeof profile[key] !== "object" || profile[key] === null || Array.isArray(profile[key]))) throw new Error(`${key} 必须是对象`);
   }
@@ -53,7 +69,9 @@ export function parseCandidateProfile(input: unknown): CandidateProfile {
     if (Array.isArray(profile[key]) && profile[key].some((item) => !item || typeof item !== "object" || Array.isArray(item))) throw new Error(`${key} 中的每一项必须是对象`);
   }
   for (const item of (profile.education as Array<Record<string, unknown>> | undefined) || []) {
-    for (const key of ["id", "school_name", "education_level", "major"]) if (typeof item[key] !== "string" || !item[key]) throw new Error(`education 缺少 ${key}`);
+    const isHs = String(item.education_level || "").toLowerCase().includes("high");
+    const requiredKeys = isHs ? ["school_name", "education_level"] : ["school_name", "education_level", "major"];
+    for (const key of requiredKeys) if (typeof item[key] !== "string" || !item[key]) throw new Error(`education 缺少 ${key}`);
   }
   return profile as CandidateProfile;
 }
@@ -919,7 +937,14 @@ export function mapFields(fields: PageField[], profile?: CandidateProfile, secti
     return experienceSlotIndices[slot];
   };
   return fields.map((field) => {
-    const isExistingFilled = field.value.trim() && !/^[-—_/\s]+$/.test(field.value.trim()) && !/^[-—_/\s]*(请选择|选择|未选择|select)[-—_/\s.]*$/i.test(field.value.trim());
+    let isExistingFilled = field.value.trim() && !/^[-—_/\s]+$/.test(field.value.trim()) && !/^[-—_/\s]*(请选择|选择|未选择|select)[-—_/\s.]*$/i.test(field.value.trim());
+    // Incomplete year-month date on page (e.g. "2024-09" when full "YYYY-MM-DD" is needed) should not be considered fully filled
+    if (isExistingFilled && (field.type === "date" || /时间|日期|date|time/.test(field.label) || /date|time/.test(field.name))) {
+      const val = field.value.trim();
+      if (/^\d{4}[-/.]\d{1,2}$/.test(val) && !field.label.includes("年月")) {
+        isExistingFilled = false;
+      }
+    }
     if (isExistingFilled) return { field, decision: "skip", reason: "已有内容，已保留" };
     if (!field.required) return { field, decision: "skip", reason: "选填项，按要求留空" };
     if (!profile) return { field, decision: "review", reason: "请先导入候选人资料" };
@@ -1059,37 +1084,41 @@ export function formatDateWithFieldClues(rawDate: string, field?: PageField): st
     return `${parts.year}-${parts.month}`;
   }
 
-  // 2. Explicit HTML5 date input (must be YYYY-MM-DD)
-  if (type === "date") {
-    return `${parts.year}-${parts.month}-${parts.day || "01"}`;
-  }
-
-  // 3. Clues from label, placeholder, name
-  if (label.includes("年月") || /yyyy[-/.]mm(?![a-z])/i.test(hint)) {
+  // 2. Explicit month-only: ONLY if label or hint explicitly specifies "年月" or "yyyy-mm" WITHOUT "日" or "dd"
+  const isExplicitMonthOnly = (label.includes("年月") || /yyyy[-/.]mm(?![a-z0-9])/i.test(hint)) && !/日|dd/i.test(label) && !/日|dd/i.test(hint);
+  if (isExplicitMonthOnly) {
+    if (hint.includes("-") || hint.includes("yyyy-mm")) return `${parts.year}-${parts.month}`;
     if (hint.includes("/") || hint.includes("yyyy/mm")) return `${parts.year}/${parts.month}`;
     if (hint.includes(".") || hint.includes("yyyy.mm")) return `${parts.year}.${parts.month}`;
     if (hint.includes("年") && hint.includes("月")) return `${parts.year}年${parts.month}月`;
     return `${parts.year}-${parts.month}`;
   }
 
-  if (/yyyy\/mm\/dd/i.test(hint) || (hint.includes("/") && /dd|日/i.test(hint))) {
-    return `${parts.year}/${parts.month}/${parts.day || "01"}`;
-  }
-  if (/yyyy\.mm\.dd/i.test(hint) || (hint.includes(".") && /dd|日/i.test(hint))) {
-    return `${parts.year}.${parts.month}.${parts.day || "01"}`;
-  }
-  if (/年月日/i.test(hint) || (hint.includes("年") && hint.includes("月") && hint.includes("日"))) {
-    return `${parts.year}年${parts.month}月${parts.day || "01"}日`;
+  // 3. Check if field explicitly requires day or if profile already has day
+  const requiresDay = type === "date" || /yyyy[-/.]mm[-/.]dd|年月日/i.test(hint) || /yyyy[-/.]mm[-/.]dd|年月日/i.test(label);
+  const day = parts.day || (requiresDay ? "01" : "");
+
+  if (day) {
+    // Clues with slash
+    if (/yyyy\/mm\/dd/i.test(hint) || (hint.includes("/") && !hint.includes("-") && !hint.includes("."))) {
+      return `${parts.year}/${parts.month}/${day}`;
+    }
+    // Clues with dot
+    if (/yyyy\.mm\.dd/i.test(hint) || (hint.includes(".") && !hint.includes("-") && !hint.includes("/"))) {
+      return `${parts.year}.${parts.month}.${day}`;
+    }
+    // Clues with Chinese 年月日
+    if (/年月日/i.test(hint) || (hint.includes("年") && hint.includes("月") && hint.includes("日"))) {
+      return `${parts.year}年${parts.month}月${day}日`;
+    }
+    return `${parts.year}-${parts.month}-${day}`;
   }
 
-  if (hint.includes("/")) {
-    return parts.day ? `${parts.year}/${parts.month}/${parts.day}` : `${parts.year}/${parts.month}`;
-  }
-  if (hint.includes(".")) {
-    return parts.day ? `${parts.year}.${parts.month}.${parts.day}` : `${parts.year}.${parts.month}`;
-  }
-
-  return parts.day ? `${parts.year}-${parts.month}-${parts.day}` : `${parts.year}-${parts.month}`;
+  // 4. Default for year-month without day requirement
+  if (hint.includes("/") || hint.includes("yyyy/mm")) return `${parts.year}/${parts.month}`;
+  if (hint.includes(".") || hint.includes("yyyy.mm")) return `${parts.year}.${parts.month}`;
+  if (hint.includes("年") && hint.includes("月")) return `${parts.year}年${parts.month}月`;
+  return `${parts.year}-${parts.month}`;
 }
 
 function formatValue(path: string, value: unknown, field?: PageField, profile?: CandidateProfile): string {
@@ -1129,7 +1158,35 @@ export function harvestPageFields(fields: PageField[], profile?: CandidateProfil
     if (/验证码|短信|captcha|search|搜索/i.test(label)) continue;
     if (/^(请选择|--请选择--|选择|未选择|select)$/i.test(rawVal)) continue;
 
-    const ruleMatch = fieldRule(field, field.section, p);
+    const normL = label.replace(/[*＊:：\s]/g, "").toLowerCase();
+
+    // Safety guard against compound dropdowns corrupting core fields
+    let ruleMatch = fieldRule(field, field.section, p);
+    if (field.kind === "select") {
+      // 1. Never harvest ID type dropdown text into id_number
+      if (/证件类型|证件种类/.test(normL) || (/身份证|护照|通行证/.test(rawVal) && !/^\d{15,18}[0-9xX]?$/.test(rawVal))) {
+        ruleMatch = { rule: { path: "identity.id_type", value: (prof) => prof.identity?.id_type }, source: "base" };
+      }
+      // 2. Never harvest mobile country code (+86) into mobile
+      if (/区号|代码/.test(normL) || /^\+?86|中国大陆/.test(rawVal)) {
+        continue;
+      }
+      // 3. Split date selects must not overwrite the full birth_date
+      if (/出生年份|出生年/.test(normL)) {
+        ruleMatch = { rule: { path: "identity.birth_date[year]", value: (prof) => parseDateComponents(prof.identity?.birth_date).year }, source: "base" };
+      } else if (/出生月份|出生月/.test(normL)) {
+        ruleMatch = { rule: { path: "identity.birth_date[month]", value: (prof) => parseDateComponents(prof.identity?.birth_date).month }, source: "base" };
+      } else if (/出生日/.test(normL)) {
+        ruleMatch = { rule: { path: "identity.birth_date[day]", value: (prof) => parseDateComponents(prof.identity?.birth_date).day }, source: "base" };
+      }
+      // 4. "是否全日制最高学历" / "是否全日制" must not overwrite education_level
+      if (/是否.*全日制.*最高学历/.test(normL)) {
+        ruleMatch = { rule: { path: "education[highest].is_highest_degree", value: (prof) => highest(prof.education)?.is_highest_degree }, source: "base" };
+      } else if (/是否.*全日制/.test(normL)) {
+        ruleMatch = { rule: { path: "education[highest].is_full_time", value: (prof) => highest(prof.education)?.study_mode }, source: "base" };
+      }
+    }
+
     if (ruleMatch) {
       const path = ruleMatch.rule.path;
       const curr = ruleMatch.rule.value(p);
@@ -1151,6 +1208,9 @@ export function harvestPageFields(fields: PageField[], profile?: CandidateProfil
     } else {
       const cleanLabel = (field.label || field.name).replace(/[*＊:：\s]/g, "").slice(0, 40);
       if (!cleanLabel || /^(请选择|选择|select|submit)$/i.test(cleanLabel)) continue;
+      // Discard JavaScript expressions, function calls, or syntax noise
+      if (/[\(\);\{\}\=\<\>]|javascript:|new\s+|function|window\./i.test(cleanLabel) || cleanLabel.length > 30) continue;
+
       const path = `soe_extended.custom_fields["${cleanLabel}"]`;
       const existingCustom = (p.soe_extended?.custom_fields as Record<string, unknown> | undefined)?.[cleanLabel];
       const existStr = existingCustom !== undefined && existingCustom !== null ? String(existingCustom).trim() : "";
@@ -1176,11 +1236,29 @@ export function harvestPageFields(fields: PageField[], profile?: CandidateProfil
 
 export function applyHarvestedFields(profile: CandidateProfile, items: HarvestedField[]): CandidateProfile {
   const updated: CandidateProfile = JSON.parse(JSON.stringify(profile));
+  if (!updated.custom_variants) updated.custom_variants = {};
 
   for (const item of items) {
     const path = item.inferredPath;
     const val = item.value;
 
+    // Universal variant learning whenever an existing field value is updated
+    if (item.previousValue && item.previousValue !== val && typeof val === "string" && val.trim() !== "") {
+      const propKey = path.split(".").pop()?.replace(/\[.*?\]/g, "") || "";
+      if (propKey && !propKey.includes("custom_fields")) {
+        if (!Array.isArray(updated.custom_variants[propKey])) updated.custom_variants[propKey] = [];
+        const prevClean = item.previousValue.trim();
+        const valClean = val.trim();
+        if (prevClean && !updated.custom_variants[propKey].includes(prevClean)) {
+          updated.custom_variants[propKey].push(prevClean);
+        }
+        if (valClean && !updated.custom_variants[propKey].includes(valClean)) {
+          updated.custom_variants[propKey].push(valClean);
+        }
+      }
+    }
+
+    // 1. Custom fields
     if (path.startsWith('soe_extended.custom_fields["')) {
       if (!updated.soe_extended) updated.soe_extended = {};
       if (!updated.soe_extended.custom_fields || typeof updated.soe_extended.custom_fields !== "object") {
@@ -1190,9 +1268,80 @@ export function applyHarvestedFields(profile: CandidateProfile, items: Harvested
       if (match) {
         (updated.soe_extended.custom_fields as Record<string, unknown>)[match[1]] = val;
       }
-    } else {
-      setNestedProperty(updated as Record<string, unknown>, path, val);
+      continue;
     }
+
+    // 2. Education level-specific records (bachelor, master, high_school, doctor, associate, highest)
+    const eduMatch = path.match(/^education\[(highest|bachelor|master|high_school|doctor|associate|\d+)\]\.(\w+)$/);
+    if (eduMatch) {
+      const levelOrIdx = eduMatch[1];
+      const prop = eduMatch[2];
+      if (!Array.isArray(updated.education)) updated.education = [];
+
+      let targetRecord: Record<string, unknown> | undefined;
+      if (/^\d+$/.test(levelOrIdx)) {
+        const idx = parseInt(levelOrIdx, 10);
+        while (updated.education.length <= idx) {
+          updated.education.push({ id: `edu_${updated.education.length}`, education_level: "unknown" });
+        }
+        targetRecord = updated.education[idx];
+      } else if (levelOrIdx === "highest") {
+        targetRecord = highest(updated.education as Array<Record<string, unknown>>) || updated.education[0];
+        if (!targetRecord) {
+          targetRecord = { id: "edu_master", education_level: "master" };
+          updated.education.push(targetRecord);
+        }
+      } else {
+        targetRecord = (updated.education as Array<Record<string, unknown>>).find((rec) => {
+          const l = String(rec.education_level || "").toLowerCase();
+          if (levelOrIdx === "bachelor") return l.includes("bachelor") || l.includes("本");
+          if (levelOrIdx === "master") return l.includes("master") || l.includes("硕") || l.includes("研");
+          if (levelOrIdx === "high_school") return l.includes("high") || l.includes("高") || l.includes("中专");
+          if (levelOrIdx === "doctor") return l.includes("doctor") || l.includes("博");
+          if (levelOrIdx === "associate") return l.includes("associate") || l.includes("专");
+          return false;
+        });
+        if (!targetRecord) {
+          targetRecord = { id: `edu_${levelOrIdx}`, education_level: levelOrIdx };
+          (updated.education as Array<Record<string, unknown>>).push(targetRecord);
+        }
+      }
+
+      // Record variant learning for school_name, major, and department
+      if (prop === "major" || prop === "school_name" || prop === "department") {
+        if (!Array.isArray(updated.custom_variants[prop])) updated.custom_variants[prop] = [];
+        const existingVal = String(targetRecord[prop] || "").trim();
+        if (existingVal && !updated.custom_variants[prop].includes(existingVal)) {
+          updated.custom_variants[prop].push(existingVal);
+        }
+        if (!updated.custom_variants[prop].includes(val)) {
+          updated.custom_variants[prop].push(val);
+        }
+      }
+
+      targetRecord[prop] = val;
+      continue;
+    }
+
+    // 3. Birth date component updates without destroying full date
+    const birthMatch = path.match(/^identity\.birth_date\[(year|month|day)\]$/);
+    if (birthMatch) {
+      if (!updated.identity) updated.identity = {};
+      const comp = birthMatch[1];
+      const existing = parseDateComponents(updated.identity.birth_date);
+      if (comp === "year") existing.year = val;
+      else if (comp === "month") existing.month = val.padStart(2, "0");
+      else if (comp === "day") existing.day = val.padStart(2, "0");
+      if (existing.year && existing.month && existing.day) {
+        updated.identity.birth_date = `${existing.year}-${existing.month}-${existing.day}`;
+      } else if (existing.year && existing.month) {
+        updated.identity.birth_date = `${existing.year}-${existing.month}`;
+      }
+      continue;
+    }
+
+    // 4. Default nested property
+    setNestedProperty(updated as Record<string, unknown>, path, val);
   }
 
   return updated;
@@ -1201,6 +1350,7 @@ export function applyHarvestedFields(profile: CandidateProfile, items: Harvested
 function setNestedProperty(obj: Record<string, unknown>, path: string, value: unknown): void {
   const normalizedPath = path
     .replace(/\[highest\]|\[latest\]/g, "[0]")
+    .replace(/\[(bachelor|master|high_school|doctor|associate)\]/g, "[0]")
     .replace(/\[year\]|\[month\]|\[day\]|\[province\]|\[city\]|\[district\]/g, "");
 
   const tokens = normalizedPath

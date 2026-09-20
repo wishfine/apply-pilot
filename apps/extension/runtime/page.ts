@@ -292,7 +292,6 @@ export function fillField(ref: string, value: string): FillReceipt {
       element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
     }
     element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-    element.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
   };
   try {
     if (element instanceof HTMLSelectElement) {
@@ -447,7 +446,12 @@ export function fillField(ref: string, value: string): FillReceipt {
       return { ok: false, message: "此控件需要手动填写" };
     }
     const landed = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement ? element.value : element.textContent || "";
-    const ok = landed.trim() === expected.trim() || (element instanceof HTMLSelectElement && landed.length > 0);
+    const norm = (str: string) => (str || "").replace(/[\s:*：\/／,，.。·()（）【】\[\]_-]/g, "").toLowerCase();
+    const normLanded = norm(landed);
+    const normExpected = norm(expected);
+    const ok = landed.trim() === expected.trim() ||
+      (element instanceof HTMLSelectElement && landed.length > 0) ||
+      (normLanded.length >= 2 && normExpected.length >= 2 && (normLanded.includes(normExpected) || normExpected.includes(normLanded)));
     return { ok, value: landed, message: ok ? "已填写并回读" : "页面未保留填入值，请手动检查" };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "控件拒绝了写入" };

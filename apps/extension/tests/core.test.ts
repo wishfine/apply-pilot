@@ -674,6 +674,176 @@ describe("extension field planning", () => {
       expect(plan[5].proposedValue).toBe("2016-09");
       expect(plan.every((item) => item.decision === "fill")).toBe(true);
     });
+
+    it("auto-migrates rogue education[bachelor] root keys into profile.education array", () => {
+      const legacyRaw = {
+        profile_id: "test-legacy",
+        education: [
+          { id: "edu_master", school_name: "清华大学", education_level: "master", major: "自动化" },
+        ],
+        "education[bachelor]": {
+          school_name: "北京工业大学",
+          major: "计算机科学与技术",
+          start_date: "2020-09-01",
+          end_date: "2024-07-01",
+        },
+        "education[high_school]": {
+          school_name: "密云二中",
+          start_date: "2017-09-01",
+          end_date: "2020-07-01",
+        },
+      };
+
+      const parsed = parseCandidateProfile(legacyRaw);
+      expect(parsed.education).toHaveLength(3);
+      const bachelor = parsed.education!.find((e) => e.education_level === "bachelor");
+      expect(bachelor).toBeDefined();
+      expect(bachelor?.school_name).toBe("北京工业大学");
+      expect(bachelor?.major).toBe("计算机科学与技术");
+      expect(bachelor?.start_date).toBe("2020-09-01");
+      expect((parsed as any)["education[bachelor]"]).toBeUndefined();
+    });
+
+    it("matches dropdown options via custom_variants when direct value does not match", () => {
+      const candidateProfile: any = {
+        ...profile,
+        education: [
+          {
+            id: "edu_bachelor",
+            school_name: "北京工业大学",
+            education_level: "bachelor",
+            major: "计算机科学与技术",
+          },
+        ],
+        custom_variants: {
+          major: ["计算机科学与技术", "计算机类/计算机科学与技术"],
+          school_name: ["北京工业大学", "北京/北京工业大学"],
+        },
+      };
+
+      const fields: PageField[] = [
+        {
+          ref: "major_select",
+          label: "本科专业",
+          name: "major",
+          kind: "select",
+          required: true,
+          value: "",
+          options: ["--请选择--", "软件工程", "网络空间安全", "计算机类/计算机科学与技术", "电子信息工程"],
+        },
+        {
+          ref: "school_select",
+          label: "毕业院校",
+          name: "school",
+          kind: "select",
+          required: true,
+          value: "",
+          options: ["--请选择--", "北京/北京大学", "北京/清华大学", "北京/北京工业大学"],
+        },
+      ];
+
+      const plan = mapFields(fields, candidateProfile);
+      expect(plan[0].decision).toBe("fill");
+      expect(plan[0].proposedValue).toBe("计算机类/计算机科学与技术");
+      expect(plan[1].decision).toBe("fill");
+      expect(plan[1].proposedValue).toBe("北京/北京工业大学");
+    });
+
+    it("defaults recruitment date inputs to YYYY-MM-DD", () => {
+      const dateField: PageField = {
+        ref: "d1",
+        label: "入学日期",
+        name: "startDate",
+        kind: "text",
+        type: "date",
+        required: true,
+        value: "",
+        options: [],
+      };
+
+      expect(formatDateWithFieldClues("2024-09", dateField)).toBe("2024-09-01");
+      expect(formatDateWithFieldClues("2024-09-01", { ...dateField, type: "text" })).toBe("2024-09-01");
+      expect(formatDateWithFieldClues("2024-09-15", { ...dateField, type: "text" })).toBe("2024-09-15");
+
+      const monthOnlyField: PageField = {
+        ...dateField,
+        type: "text",
+        label: "入学年月 (YYYY-MM)",
+      };
+      expect(formatDateWithFieldClues("2024-09-01", monthOnlyField)).toBe("2024-09");
+      expect(formatDateWithFieldClues("2024-09", monthOnlyField)).toBe("2024-09");
+    });
+
+    it("does not let incomplete draft date YYYY-MM block filling full date YYYY-MM-DD", () => {
+      const candidateProfile: any = {
+        ...profile,
+        education: [
+          {
+            id: "edu_bachelor",
+            school_name: "北京工业大学",
+            education_level: "bachelor",
+            major: "计算机科学与技术",
+            start_date: "2020-09-01",
+          },
+        ],
+      };
+
+      const field: PageField = {
+        ref: "d1",
+        label: "本科入学时间",
+        name: "bStart",
+        kind: "text",
+        type: "text",
+        required: true,
+        value: "2020-09", // page has draft year-month only
+        options: [],
+      };
+
+      const plan = mapFields([field], candidateProfile);
+      expect(plan[0].decision).toBe("fill");
+      expect(plan[0].proposedValue).toBe("2020-09-01");
+    });
+
+    it("protects identity.id_number and contact.mobile from being corrupted during harvest", () => {
+      const testProfile: any = {
+        profile_id: "test-prot",
+        identity: {
+          name: "张三",
+          id_type: "身份证",
+          id_number: "110228200208040036",
+        },
+        contact: {
+          mobile: "13691503049",
+        },
+      };
+
+      const scannedFields: PageField[] = [
+        {
+          ref: "s1",
+          label: "证件类型",
+          name: "idType",
+          kind: "select",
+          required: true,
+          value: "国内身份证或护照（含港澳台）",
+          options: ["国内身份证或护照（含港澳台）", "外国护照"],
+        },
+        {
+          ref: "s2",
+          label: "手机国家代码",
+          name: "countryCode",
+          kind: "select",
+          required: true,
+          value: "中国大陆（+86）",
+          options: ["中国大陆（+86）", "其他地区"],
+        },
+      ];
+
+      const harvested = harvestPageFields(scannedFields, testProfile);
+      const updated = applyHarvestedFields(testProfile, harvested);
+
+      expect(updated.identity!.id_number).toBe("110228200208040036");
+      expect(updated.contact!.mobile).toBe("13691503049");
+    });
   });
 });
 
