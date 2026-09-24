@@ -188,46 +188,96 @@ async function fill() {
   }
   state.busy = true; state.error = undefined; render();
   try {
-    const fillItems = state.plan.filter((candidate) => candidate.decision === "fill" && candidate.proposedValue !== undefined);
-    // Fill non-select fields first, then selects last — selects can trigger cascading DOM changes
-    const ordered = [...fillItems.filter((item) => item.field.kind !== "select"), ...fillItems.filter((item) => item.field.kind === "select")];
-    for (const item of ordered) {
-      const receiptKey = `${item.field.frameId ?? 0}:${item.field.ref}`;
-      if (state.receipts[receiptKey]?.ok) continue;
-      const value = item.proposedValue;
-      if (value === undefined) continue;
-      const operationId = await operations.prepare(state.runId || "untracked", receiptKey);
-      try {
-        if (item.field.kind === "file") {
-          if (!state.asset) {
-            state.receipts[receiptKey] = { ok: false, message: "请先在侧栏选择简历附件" };
-            await operations.finish(operationId, "failed", "ASSET_NOT_SELECTED");
-            continue;
-          }
-          const chunkSize = 512 * 1024;
-          let receipt: FillReceipt | undefined;
-          try {
-            for (let offset = 0; offset < state.asset.bytes.length; offset += chunkSize) {
-              const chunk = state.asset.bytes.slice(offset, offset + chunkSize);
-              const done = offset + chunk.length >= state.asset.bytes.length;
-              const results = await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, frameIds: [item.field.frameId ?? 0] }, func: fillFileChunk, args: [item.field.ref, state.asset.name, state.asset.type, chunk, done, state.asset.bytes.length] });
-              if (done) receipt = results[0]?.result as FillReceipt | undefined;
-            }
-          } catch (error) {
-            await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, frameIds: [item.field.frameId ?? 0] }, func: clearFileBuffer, args: [item.field.ref] }).catch(() => undefined);
-            throw error;
-          }
-          state.receipts[receiptKey] = receipt || { ok: false, message: "页面没有返回附件结果" };
-        } else {
-          const results = await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, frameIds: [item.field.frameId ?? 0] }, func: fillField, args: [item.field.ref, value] });
-          state.receipts[receiptKey] = results[0]?.result as FillReceipt || { ok: false, message: "页面没有返回填写结果" };
-        }
-        await operations.finish(operationId, state.receipts[receiptKey].ok ? "verified" : "failed");
-      } catch (error) {
-        await operations.finish(operationId, "unknown", "EXECUTION_ERROR");
-        throw error;
+    let cascadePass = 0;
+    const MAX_CASCADE_PASSES = 3;
+
+    while (cascadePass < MAX_CASCADE_PASSES) {
+      cascadePass++;
+      const fillItems = state.plan.filter((candidate) => candidate.decision === "fill" && candidate.proposedValue !== undefined);
+      const pendingItems = fillItems.filter((item) => {
+        const receiptKey = `${item.field.frameId ?? 0}:${item.field.ref}`;
+        return !state.receipts[receiptKey]?.ok;
+      });
+
+      if (pendingItems.length === 0 && cascadePass > 1) {
+        break;
       }
-      render();
+
+      // Fill in natural DOM order so top-level selectors (e.g. Highest Education) activate before dependent subfields
+      const ordered = pendingItems;
+
+      for (const item of ordered) {
+        const receiptKey = `${item.field.frameId ?? 0}:${item.field.ref}`;
+        if (state.receipts[receiptKey]?.ok) continue;
+        const value = item.proposedValue;
+        if (value === undefined) continue;
+        const operationId = await operations.prepare(state.runId || "untracked", receiptKey);
+        try {
+          if (item.field.kind === "file") {
+            if (!state.asset) {
+              state.receipts[receiptKey] = { ok: false, message: "请先在侧栏选择简历附件" };
+              await operations.finish(operationId, "failed", "ASSET_NOT_SELECTED");
+              continue;
+            }
+            const chunkSize = 512 * 1024;
+            let receipt: FillReceipt | undefined;
+            try {
+              for (let offset = 0; offset < state.asset.bytes.length; offset += chunkSize) {
+                const chunk = state.asset.bytes.slice(offset, offset + chunkSize);
+                const done = offset + chunk.length >= state.asset.bytes.length;
+                const results = await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, frameIds: [item.field.frameId ?? 0] }, func: fillFileChunk, args: [item.field.ref, state.asset.name, state.asset.type, chunk, done, state.asset.bytes.length] });
+                if (done) receipt = results[0]?.result as FillReceipt | undefined;
+              }
+            } catch (error) {
+              await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, frameIds: [item.field.frameId ?? 0] }, func: clearFileBuffer, args: [item.field.ref] }).catch(() => undefined);
+              throw error;
+            }
+            state.receipts[receiptKey] = receipt || { ok: false, message: "页面没有返回附件结果" };
+          } else {
+            const results = await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, frameIds: [item.field.frameId ?? 0] }, func: fillField, args: [item.field.ref, value] });
+            state.receipts[receiptKey] = results[0]?.result as FillReceipt || { ok: false, message: "页面没有返回填写结果" };
+          }
+          await operations.finish(operationId, state.receipts[receiptKey].ok ? "verified" : "failed");
+        } catch (error) {
+          await operations.finish(operationId, "unknown", "EXECUTION_ERROR");
+          throw error;
+        }
+        render();
+      }
+
+      // Check if filling caused the page to dynamically render new cascading sections (e.g. Bachelor fields after Master is chosen)
+      if (cascadePass < MAX_CASCADE_PASSES) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        let scanResults: chrome.scripting.InjectionResult<PageScan>[];
+        try {
+          scanResults = await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, allFrames: true }, func: scanPage });
+        } catch {
+          scanResults = await chrome.scripting.executeScript({ target: { tabId: state.activeTab.id, frameIds: [0] }, func: scanPage });
+        }
+        const frames = scanResults.map((item) => ({ frameId: item.frameId ?? 0, scan: item.result as PageScan })).filter((item) => item.scan);
+        if (!frames.length) break;
+        const primary = frames.find((item) => item.frameId === 0) || frames[0];
+        const pageState = primary.scan.pageState !== "empty" ? primary.scan.pageState : frames.find((item) => item.scan.pageState === "form")?.scan.pageState || "empty";
+        const sections = primary.scan.sections.length ? primary.scan.sections : frames.find((item) => item.scan.sections.length)?.scan.sections || [];
+        const freshFields = frames.flatMap((item) => item.scan.fields.map((field) => ({ ...field, frameId: item.frameId })));
+        state.scan = {
+          url: primary.scan.url,
+          title: primary.scan.title,
+          pageState,
+          activeSection: primary.scan.activeSection || frames.find((item) => item.scan.activeSection)?.scan.activeSection,
+          documentReady: frames.every((item) => item.scan.documentReady),
+          embeddedFrameCount: primary.scan.embeddedFrameCount,
+          sections,
+          fields: freshFields,
+        };
+        const freshPlan = buildPlan(freshFields, state.scan.activeSection);
+        state.plan = freshPlan;
+        const newlyRevealed = freshPlan.filter((candidate) => {
+          const key = `${candidate.field.frameId ?? 0}:${candidate.field.ref}`;
+          return candidate.decision === "fill" && candidate.proposedValue !== undefined && !state.receipts[key]?.ok;
+        });
+        if (newlyRevealed.length === 0) break;
+      }
     }
   } catch (error) { state.error = explainBrowserError(error, "填写失败"); }
   finally { state.busy = false; render(); }

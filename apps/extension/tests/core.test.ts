@@ -844,6 +844,108 @@ describe("extension field planning", () => {
       expect(updated.identity!.id_number).toBe("110228200208040036");
       expect(updated.contact!.mobile).toBe("13691503049");
     });
+
+    it("correctly maps soe education attributes: primary education, full-time highest, rank and department fallback", () => {
+      const soeProfile: any = {
+        ...profile,
+        education: [
+          {
+            id: "edu_master",
+            school_name: "北京工业大学",
+            education_level: "master",
+            academic_degree: "工学硕士",
+            major: "计算机科学与技术",
+            department: "计算机学院",
+            study_mode: "全日制",
+            is_highest_degree: "yes",
+            ranking_pct: "前 5%",
+            school_system: "3",
+          },
+          {
+            id: "edu_bachelor",
+            school_name: "北京工业大学",
+            education_level: "bachelor",
+            academic_degree: "工学学士",
+            major: "计算机科学与技术",
+            department: "计算机学院",
+            study_mode: "全日制统招",
+            is_highest_degree: "no",
+            ranking_pct: "前 5%",
+            school_system: "4",
+          },
+        ],
+        soe_extended: {
+          custom_fields: {
+            受教育类型: "全日制统招",
+            年级排名: "前5%",
+          },
+        },
+      };
+
+      const fields: PageField[] = [
+        { ref: "f1", label: "是否主教育经历", name: "isPrimary", kind: "select", required: true, value: "", options: ["--请选择--", "是", "否"] },
+        { ref: "f2", label: "是否全日制最高学历", name: "isFullTimeHighest", kind: "select", required: true, value: "", options: ["--请选择--", "是", "否"] },
+        { ref: "f3", label: "受教育类型", name: "studyType", kind: "select", required: true, value: "", options: ["--请选择--", "全日制统招", "非全日制"] },
+        { ref: "f4", label: "年级排名", name: "rank", kind: "select", required: true, value: "", options: ["--请选择--", "前5%", "前10%"] },
+        { ref: "f5", label: "学制", name: "system", kind: "select", required: true, value: "", options: ["--请选择--", "2", "3", "4"] },
+        { ref: "f6", label: "本科受教育类型", name: "bStudyType", kind: "select", required: true, value: "", options: ["--请选择--", "全日制统招", "非全日制"] },
+        { ref: "f7", label: "本科成绩排名", name: "bRank", kind: "select", required: true, value: "", options: ["--请选择--", "前5%", "前10%"] },
+        { ref: "f8", label: "院系", name: "deptCampus", kind: "select", required: true, value: "", options: ["--请选择--", "北京/北京工业大学", "北京/北京工业大学通州校区", "北京/北京工业大学耿丹学院"] },
+      ];
+
+      const plan = mapFields(fields, soeProfile);
+      expect(plan[0].proposedValue).toBe("是");
+      expect(plan[1].proposedValue).toBe("是");
+      expect(plan[2].proposedValue).toBe("全日制统招");
+      expect(plan[3].proposedValue).toBe("前5%");
+      expect(plan[4].proposedValue).toBe("3");
+      expect(plan[5].proposedValue).toBe("全日制统招");
+      expect(plan[6].proposedValue).toBe("前5%");
+      // Department falls back to university main campus when options are campuses!
+      expect(plan[7].proposedValue).toBe("北京/北京工业大学");
+      expect(plan.every((item) => item.decision === "fill")).toBe(true);
+    });
+
+    it("maps bachelor dates, school and department accurately with full date format", () => {
+      const bachelorProfile: any = {
+        ...profile,
+        education: [
+          {
+            id: "edu_master",
+            school_name: "北京/北京工业大学",
+            education_level: "master",
+            major: "计算机科学与技术类/计算机系统结构",
+            start_date: "2024-09-01",
+            end_date: "2027-07-01",
+          },
+          {
+            id: "edu_bachelor",
+            school_name: "北京/北京工业大学",
+            education_level: "bachelor",
+            major: "计算机类/计算机科学与技术",
+            department: "计算机学院",
+            start_date: "2020-09-01",
+            end_date: "2024-07-01",
+          },
+        ],
+      };
+
+      const fields: PageField[] = [
+        { ref: "b1", label: "* 本科入学时间", name: "bStartDate", kind: "text", required: true, value: "", options: [] },
+        { ref: "b2", label: "* 本科毕业时间", name: "bEndDate", kind: "text", required: true, value: "", options: [] },
+        { ref: "b3", label: "* 本科学校名称", name: "bSchool", kind: "text", required: true, value: "", options: [] },
+        { ref: "b4", label: "* 本科院系", name: "bDept", kind: "text", required: true, value: "", options: [] },
+        { ref: "b5", label: "* 本科专业", name: "bMajor", kind: "text", required: true, value: "", options: [] },
+      ];
+
+      const plan = mapFields(fields, bachelorProfile);
+      expect(plan[0].proposedValue).toBe("2020-09-01");
+      expect(plan[1].proposedValue).toBe("2024-07-01");
+      expect(plan[2].proposedValue).toBe("北京/北京工业大学");
+      expect(plan[3].proposedValue).toBe("计算机学院");
+      expect(plan[4].proposedValue).toBe("计算机类/计算机科学与技术");
+      expect(plan.every((item) => item.decision === "fill")).toBe(true);
+    });
   });
 });
 

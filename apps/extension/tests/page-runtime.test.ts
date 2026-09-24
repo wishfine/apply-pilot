@@ -274,5 +274,56 @@ describe("page runtime", () => {
     expect(fillMonth.ok).toBe(true);
     expect(document.querySelector<HTMLSelectElement>("#birth-month")?.value).toBe("05");
   });
+
+  it("successfully fills readonly datepicker and schoolpicker inputs and syncs hidden inputs", () => {
+    document.body.innerHTML = `
+      <div class="form-item">
+        <label>* 本科入学时间</label>
+        <input id="b-start-date" class="Wdate" type="text" readonly="readonly" />
+        <input id="b-start-date-hidden" name="bStartDate" type="hidden" />
+      </div>
+      <div class="form-item">
+        <label>* 本科学校名称</label>
+        <input id="b-school-display" type="text" readonly="readonly" />
+        <input id="b-school-code" name="bSchoolCode" type="hidden" />
+      </div>
+    `;
+
+    const scan = scanPage();
+    expect(scan.fields.map((f) => f.label)).toEqual(["* 本科入学时间", "* 本科学校名称"]);
+
+    const fillDate = fillField(scan.fields[0].ref, "2020-09-01");
+    expect(fillDate.ok).toBe(true);
+    expect(document.querySelector<HTMLInputElement>("#b-start-date")?.value).toBe("2020-09-01");
+    expect(document.querySelector<HTMLInputElement>("#b-start-date-hidden")?.value).toBe("2020-09-01");
+
+    const fillSchool = fillField(scan.fields[1].ref, "北京/北京工业大学");
+    expect(fillSchool.ok).toBe(true);
+    expect(document.querySelector<HTMLInputElement>("#b-school-display")?.value).toBe("北京/北京工业大学");
+    expect(document.querySelector<HTMLInputElement>("#b-school-code")?.value).toBe("北京/北京工业大学");
+  });
+
+  it("maintains stable data-applypilot-ref across multiple scans when new elements are revealed", () => {
+    document.body.innerHTML = `
+      <div class="form-item"><label>姓名</label><input id="name" type="text" /></div>
+      <div class="form-item"><label>学历</label><select id="degree"><option value="master">硕士</option></select></div>
+    `;
+
+    const scan1 = scanPage();
+    const nameRef1 = scan1.fields[0].ref;
+    const degreeRef1 = scan1.fields[1].ref;
+
+    // Simulate page dynamically rendering bachelor fields below
+    const extra = document.createElement("div");
+    extra.className = "form-item";
+    extra.innerHTML = `<label>本科学校</label><input id="b-school" type="text" />`;
+    document.body.appendChild(extra);
+
+    const scan2 = scanPage();
+    expect(scan2.fields[0].ref).toBe(nameRef1);
+    expect(scan2.fields[1].ref).toBe(degreeRef1);
+    expect(scan2.fields[2].ref).not.toBe(nameRef1);
+    expect(scan2.fields[2].ref).not.toBe(degreeRef1);
+  });
 });
 

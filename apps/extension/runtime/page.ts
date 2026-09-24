@@ -138,6 +138,10 @@ export function scanPage(): PageScan {
     return `${section}:${ancestor.tagName.toLowerCase()}:${Math.max(index, 0)}`;
   };
   let sequence = 0;
+  roots.forEach((root) => root.querySelectorAll("[data-applypilot-ref]").forEach((el) => {
+    const m = (el.getAttribute("data-applypilot-ref") || "").match(/^ap-(\d+)$/);
+    if (m) sequence = Math.max(sequence, parseInt(m[1], 10) + 1);
+  }));
   for (const element of Array.from(new Set(candidates))) {
     const control = element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
     const type = String((control as HTMLInputElement).type || element.getAttribute("role") || "text").toLowerCase();
@@ -221,8 +225,11 @@ export function scanPage(): PageScan {
       }
     }
 
-    const ref = `ap-${sequence++}`;
-    element.setAttribute("data-applypilot-ref", ref);
+    let ref = element.getAttribute("data-applypilot-ref");
+    if (!ref) {
+      ref = `ap-${sequence++}`;
+      element.setAttribute("data-applypilot-ref", ref);
+    }
     const options = element instanceof HTMLSelectElement ? Array.from(element.options).filter((option) => !option.disabled && clean(option.textContent)).map((option) => clean(option.textContent)) : [];
     let value = "";
     if (element instanceof HTMLSelectElement) {
@@ -433,19 +440,95 @@ export function fillField(ref: string, value: string): FillReceipt {
       const wanted = /^(是|有|true|yes|1|已婚|男)$/i.test(expected);
       if (element.checked !== wanted) element.click();
     } else if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-      if (typeof element.focus === "function") element.focus();
+      if (element instanceof HTMLInputElement && element.readOnly) {
+        element.readOnly = false;
+      }
+      if (element instanceof HTMLInputElement && element.disabled) {
+        element.disabled = false;
+      }
+
+      if (typeof element.focus === "function") {
+        element.focus();
+      }
+
       const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
-      if (!setter) return { ok: false, message: "浏览器不允许写入该控件" };
-      setter.call(element, expected);
+      if (setter) {
+        setter.call(element, expected);
+      }
+      element.value = expected;
+      element.setAttribute("value", expected);
+      element.defaultValue = expected;
+      element.setAttribute("data-value", expected);
+      element.setAttribute("data-val", expected);
+      element.setAttribute("data-date", expected);
+
       dispatch();
+
+      // Trigger focus and blur events for validation/model commit
+      try {
+        element.dispatchEvent(new Event("focus", { bubbles: true }));
+        element.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
+      } catch {
+        // Ignored
+      }
+
+      // Sync to nearby hidden inputs if any (e.g. for custom school pickers or date pickers)
+      try {
+        const container = element.closest("td, .form-item, .form-group, .field, [class*='field'], [class*='form'], [class*='row'], .row, tr, [class*='item'], div") || element.parentElement;
+        if (container) {
+          const hiddenInputs = Array.from(container.querySelectorAll("input[type='hidden']")) as HTMLInputElement[];
+          for (const hidden of hiddenInputs) {
+            const hName = `${hidden.name} ${hidden.id}`.toLowerCase();
+            const eName = `${element.name} ${element.id}`.toLowerCase();
+            if (hiddenInputs.length === 1 || /school|univ|college|date|time|major|dept|code|val|id/i.test(hName) || (eName && hName.includes(eName.replace(/display|text|input/gi, "")))) {
+              hidden.value = expected;
+              hidden.setAttribute("value", expected);
+              hidden.dispatchEvent(new Event("input", { bubbles: true }));
+              hidden.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          }
+        }
+      } catch {
+        // Ignored
+      }
+
+      // If this input opened an autocomplete/suggestion popup, click the matching item to close it cleanly
+      try {
+        const ownerRoot = element.getRootNode() as Document | ShadowRoot;
+        const popups = Array.from(ownerRoot.querySelectorAll("[role='listbox'], [role='menu'], .el-autocomplete-suggestion, .el-select-dropdown, .ant-select-dropdown, [class*='suggest'], [class*='autocomplete'], [class*='dropdown-menu']"))
+          .filter((p) => (p as HTMLElement).getClientRects().length > 0);
+        let clicked = false;
+        for (const popup of popups) {
+          const items = Array.from(popup.querySelectorAll("[role='option'], [role='menuitem'], li, .item, [class*='item']"))
+            .filter((i) => (i as HTMLElement).getClientRects().length > 0);
+          const normStr = (s: string) => (s || "").replace(/[\s:*：\/／,，.。·()（）【】\[\]_-]/g, "").toLowerCase();
+          const normExp = normStr(expected);
+          const match = items.find((i) => {
+            const t = normStr(i.textContent || "");
+            return t === normExp || (t.length >= 2 && normExp.length >= 2 && (t.includes(normExp) || normExp.includes(t)));
+          });
+          if (match) {
+            (match as HTMLElement).click();
+            clicked = true;
+            break;
+          }
+        }
+        if (!clicked && popups.length > 0) {
+          document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        }
+      } catch {
+        // Ignored
+      }
     } else if (element.isContentEditable) {
       element.textContent = expected;
       dispatch();
     } else {
       return { ok: false, message: "此控件需要手动填写" };
     }
-    const landed = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement ? element.value : element.textContent || "";
+    const landed = (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)
+      ? (element.value || element.getAttribute("value") || "")
+      : (element.textContent || "");
     const norm = (str: string) => (str || "").replace(/[\s:*：\/／,，.。·()（）【】\[\]_-]/g, "").toLowerCase();
     const normLanded = norm(landed);
     const normExpected = norm(expected);

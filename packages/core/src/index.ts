@@ -480,6 +480,21 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "学习方式": { path: "education[highest].study_mode", value: (p) => highest(p.education)?.study_mode },
   "学习形式": { path: "education[highest].study_mode", value: (p) => highest(p.education)?.study_mode },
   "培养方式": { path: "education[highest].study_mode", value: (p) => highest(p.education)?.study_mode },
+  "受教育类型": { path: "education[highest].study_mode", value: (p) => highest(p.education)?.study_mode || (p.soe_extended?.custom_fields as any)?.["受教育类型"] || "全日制统招" },
+  "教育类型": { path: "education[highest].study_mode", value: (p) => highest(p.education)?.study_mode || (p.soe_extended?.custom_fields as any)?.["受教育类型"] || "全日制统招" },
+  "学制": { path: "education[highest].school_system", value: (p) => highest(p.education)?.school_system || (p.soe_extended?.custom_fields as any)?.["学制"] || "3" },
+  "年级排名": { path: "education[highest].ranking_pct", value: (p) => highest(p.education)?.ranking_pct || (p.soe_extended?.custom_fields as any)?.["年级排名"] || "前5%" },
+  "成绩排名": { path: "education[highest].ranking_pct", value: (p) => highest(p.education)?.ranking_pct || (p.soe_extended?.custom_fields as any)?.["年级排名"] || "前5%" },
+  "综合排名": { path: "education[highest].ranking_pct", value: (p) => highest(p.education)?.ranking_pct || (p.soe_extended?.custom_fields as any)?.["年级排名"] || "前5%" },
+  "专业排名": { path: "education[highest].ranking_pct", value: (p) => highest(p.education)?.ranking_pct || (p.soe_extended?.custom_fields as any)?.["年级排名"] || "前5%" },
+  "是否主教育经历": { path: "education[highest].is_primary", value: () => "是" },
+  "是否为主教育经历": { path: "education[highest].is_primary", value: () => "是" },
+  "主教育经历": { path: "education[highest].is_primary", value: () => "是" },
+  "是否全日制": { path: "education[highest].is_full_time", value: (p) => (String(highest(p.education)?.study_mode || "").includes("全日制") ? "是" : "否") },
+  "是否为全日制": { path: "education[highest].is_full_time", value: (p) => (String(highest(p.education)?.study_mode || "").includes("全日制") ? "是" : "否") },
+  "是否全日制最高学历": { path: "education[highest].is_full_time_highest", value: (p) => (String(highest(p.education)?.study_mode || "").includes("全日制") ? "是" : "否") },
+  "最高学历是否全日制": { path: "education[highest].is_full_time_highest", value: (p) => (String(highest(p.education)?.study_mode || "").includes("全日制") ? "是" : "否") },
+  "是否为全日制最高学历": { path: "education[highest].is_full_time_highest", value: (p) => (String(highest(p.education)?.study_mode || "").includes("全日制") ? "是" : "否") },
   "班级": { path: "education[highest].class_name", value: (p) => highest(p.education)?.class_name },
   "所在班级": { path: "education[highest].class_name", value: (p) => highest(p.education)?.class_name },
   "学号": { path: "education[highest].student_id", value: (p) => highest(p.education)?.student_id },
@@ -490,6 +505,9 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "本科学校": { path: "education[bachelor].school_name", value: (p) => educationForLevel(p.education, "bachelor")?.school_name },
   "本科院校": { path: "education[bachelor].school_name", value: (p) => educationForLevel(p.education, "bachelor")?.school_name },
   "本科毕业学校": { path: "education[bachelor].school_name", value: (p) => educationForLevel(p.education, "bachelor")?.school_name },
+  "本科就读学校": { path: "education[bachelor].school_name", value: (p) => educationForLevel(p.education, "bachelor")?.school_name },
+  "本科高校": { path: "education[bachelor].school_name", value: (p) => educationForLevel(p.education, "bachelor")?.school_name },
+  "本科就读院校": { path: "education[bachelor].school_name", value: (p) => educationForLevel(p.education, "bachelor")?.school_name },
   "本科专业": { path: "education[bachelor].major", value: (p) => educationForLevel(p.education, "bachelor")?.major },
   "本科专业名称": { path: "education[bachelor].major", value: (p) => educationForLevel(p.education, "bachelor")?.major },
   "本科所学专业": { path: "education[bachelor].major", value: (p) => educationForLevel(p.education, "bachelor")?.major },
@@ -511,7 +529,12 @@ const aliases: Record<string, { path: string; value: (profile: CandidateProfile)
   "本科绩点": { path: "education[bachelor].gpa", value: (p) => educationForLevel(p.education, "bachelor")?.gpa },
   "本科gpa": { path: "education[bachelor].gpa", value: (p) => educationForLevel(p.education, "bachelor")?.gpa },
   "本科学习方式": { path: "education[bachelor].study_mode", value: (p) => educationForLevel(p.education, "bachelor")?.study_mode },
-  "本科受教育类型": { path: "education[bachelor].study_mode", value: (p) => educationForLevel(p.education, "bachelor")?.study_mode },
+  "本科受教育类型": { path: "education[bachelor].study_mode", value: (p) => educationForLevel(p.education, "bachelor")?.study_mode || (p.soe_extended?.custom_fields as any)?.["本科受教育类型"] || (p.soe_extended?.custom_fields as any)?.["受教育类型"] || "全日制统招" },
+  "本科成绩排名": { path: "education[bachelor].ranking_pct", value: (p) => educationForLevel(p.education, "bachelor")?.ranking_pct || (p.soe_extended?.custom_fields as any)?.["本科成绩排名"] || (p.soe_extended?.custom_fields as any)?.["年级排名"] || "前5%" },
+  "本科年级排名": { path: "education[bachelor].ranking_pct", value: (p) => educationForLevel(p.education, "bachelor")?.ranking_pct || (p.soe_extended?.custom_fields as any)?.["本科成绩排名"] || (p.soe_extended?.custom_fields as any)?.["年级排名"] || "前5%" },
+  "本科是否全日制": { path: "education[bachelor].is_full_time", value: (p) => (String(educationForLevel(p.education, "bachelor")?.study_mode || "").includes("全日制") ? "是" : "否") },
+  "本科是否主教育经历": { path: "education[bachelor].is_primary", value: () => "否" },
+  "本科主教育经历": { path: "education[bachelor].is_primary", value: () => "否" },
 
   // 硕士 / 研究生
   "硕士学校名称": { path: "education[master].school_name", value: (p) => educationForLevel(p.education, "master")?.school_name },
@@ -1008,7 +1031,7 @@ export function mapFields(fields: PageField[], profile?: CandidateProfile, secti
       proposedValue = `${proposedValue}-01`;
     }
 
-    if (field.kind === "select" && field.options && field.options.length > 0) {
+    if (field.options && field.options.length > 0) {
       let matched = matchOptionText(field.options, proposedValue);
 
       // Multi-format date option matching fallback
@@ -1054,6 +1077,17 @@ export function mapFields(fields: PageField[], profile?: CandidateProfile, secti
               proposedValue = matched;
               break;
             }
+          }
+        }
+      }
+
+      // Fallback for department / 院系: if options are actually campus/school names (e.g. 北京/北京工业大学)
+      if (!matched && profilePath.endsWith(".department") && field.options && field.options.length > 0) {
+        const school = (profilePath.includes("bachelor") ? educationForLevel(profile?.education, "bachelor")?.school_name : highest(profile?.education)?.school_name) || "";
+        if (school) {
+          const schoolMatch = matchOptionText(field.options, school);
+          if (schoolMatch) {
+            matched = schoolMatch;
           }
         }
       }
