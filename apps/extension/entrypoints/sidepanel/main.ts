@@ -326,16 +326,6 @@ async function importAttachment(file: File) {
   if (state.scan) { await refreshPlanFromApi(); render(); }
 }
 
-async function unlock() {
-  const passphrase = document.querySelector<HTMLInputElement>("#passphrase")?.value || "";
-  state.busy = true; state.error = undefined; render();
-  try {
-    await store.unlock(passphrase);
-    state.profile = await store.load();
-  } catch (error) { state.error = error instanceof Error ? error.message : "资料库解锁失败"; }
-  finally { state.busy = false; render(); }
-}
-
 async function harvest() {
   state.busy = true; state.error = undefined; state.harvestMessage = undefined; render();
   try {
@@ -486,10 +476,6 @@ function render() {
 
   const profileSection = h("section", { class: "card" });
   profileSection.append(h("div", { class: "card-title", text: "候选人资料" }), h("p", { class: "muted", text: state.profile ? `已加载：${state.profile.identity?.name || state.profile.profile_id}` : "尚未导入资料" }));
-  const passphrase = h("input", { id: "passphrase", type: "password", placeholder: "资料库密码（至少 8 个字符）" }) as HTMLInputElement;
-  const unlockButton = h("button", { class: "small-button", text: "解锁资料库" }) as HTMLButtonElement;
-  unlockButton.disabled = state.busy; unlockButton.onclick = () => void unlock();
-  profileSection.append(h("div", { class: "unlock-row" }, [passphrase, unlockButton]));
   const file = h("input", { type: "file", accept: ".yaml,.yml,.json" }) as HTMLInputElement;
   file.onchange = () => { const selected = file.files?.[0]; if (selected) void importProfile(selected).catch((error) => { state.error = error instanceof Error ? error.message : "资料导入失败"; render(); }); };
   profileSection.append(file);
@@ -533,7 +519,7 @@ function render() {
   if (state.warning) root.append(h("div", { class: "warning", text: state.warning }));
 }
 
-void store.load().then((profile) => { state.profile = profile; render(); }).catch((error) => { state.error = error instanceof Error ? error.message : "资料库需要先解锁"; render(); });
+void store.load().then((profile) => { state.profile = profile; render(); }).catch((error) => { state.error = error instanceof Error ? error.message : "资料库加载失败"; render(); });
 render();
 
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {

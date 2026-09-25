@@ -16,16 +16,16 @@ async function deleteDatabase() {
 afterEach(() => deleteDatabase());
 
 describe("encrypted profile store", () => {
-  it("round-trips a profile and rejects an incorrect password", async () => {
+  it("round-trips a profile directly without requiring a password", async () => {
     const first = new ProfileStore();
-    await first.unlock("correct horse battery");
     await first.save(sample);
     expect(await first.load()).toEqual(sample);
 
     const second = new ProfileStore();
-    await expect(second.unlock("wrong password")).rejects.toThrow("密码不正确");
-    await second.unlock("correct horse battery");
     expect(await second.load()).toEqual(sample);
+
+    await second.clear();
+    expect(await second.load()).toBeUndefined();
   });
 
   it("records field operations without storing their values", async () => {
